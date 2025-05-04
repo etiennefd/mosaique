@@ -17,6 +17,8 @@ let history = [];   // Array to store previous grid states for undo
 const MAX_HISTORY = 50; // Limit undo history size
 let isDragging = false;
 let lastPixelCoords = null; // Store the last {row, col} during drag
+let lastClickCoords = null; // Store the last {row, col} clicked for Shift+Click line
+let shiftKeyPressed = false; // Track if Shift key is pressed
 let currentDragMode = null; // 'draw' or 'erase'
 // --- End State ---
 
@@ -147,25 +149,54 @@ let changeOccurred = false;
 
 canvas.addEventListener('mousedown', (event) => {
     changeOccurred = false; // Reset flag for this action
-    lastPixelCoords = null; // Reset last coords for new drag
+    lastPixelCoords = null; // Reset last drag coords for new action
     const coords = getPixelCoords(event);
+
     if (coords) {
-        isDragging = true;
         const { row, col } = coords;
 
-        // Save state *before* this action starts
-        if (history.length >= MAX_HISTORY) {
-            history.shift(); // Remove oldest state if history is full
-        }
-        history.push(deepCopyGrid(gridState));
-        // console.log(`State saved. History size: ${history.length}`); // Debugging
+        if (shiftKeyPressed && lastClickCoords) {
+            // --- Shift+Click Logic --- 
+            // Don't start dragging
+            isDragging = false;
+            // Save state before drawing the line
+            if (history.length >= MAX_HISTORY) {
+                history.shift();
+            }
+            history.push(deepCopyGrid(gridState));
+            // console.log(`State saved (Shift+Click). History size: ${history.length}`);
 
-        // Determine mode based on the first pixel clicked
-        currentDragMode = (gridState[row][col] === 0) ? 'draw' : 'erase';
-        if (handlePixelChange(row, col, currentDragMode)) {
-            changeOccurred = true;
+            // Draw line from last click to current click (always in 'draw' mode for now)
+            if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, row, col, 'draw')) {
+                changeOccurred = true;
+            }
+
+            // If no change actually occurred, pop the saved state
+            if (!changeOccurred && history.length > 0) {
+                history.pop();
+                // console.log(`No change detected (Shift+Click), removed saved state. History size: ${history.length}`);
+            }
+            lastClickCoords = { row, col }; // Update last click position AFTER drawing line
+             // --- End Shift+Click Logic ---
+        } else {
+            // --- Normal Click/Drag Logic --- 
+            isDragging = true; // Prepare for potential drag
+            // Save state *before* this action starts
+            if (history.length >= MAX_HISTORY) {
+                history.shift();
+            }
+            history.push(deepCopyGrid(gridState));
+            // console.log(`State saved (Drag Start). History size: ${history.length}`);
+
+            // Determine mode based on the first pixel clicked
+            currentDragMode = (gridState[row][col] === 0) ? 'draw' : 'erase';
+            if (handlePixelChange(row, col, currentDragMode)) {
+                changeOccurred = true;
+            }
+            lastPixelCoords = { row, col }; // Set starting point for line interpolation during drag
+            lastClickCoords = { row, col }; // Update last click position
+            // --- End Normal Click/Drag Logic ---
         }
-        lastPixelCoords = { row, col }; // Set starting point for line drawing
     }
 });
 
@@ -191,13 +222,20 @@ canvas.addEventListener('mousemove', (event) => {
 
 canvas.addEventListener('mouseup', () => {
     if (isDragging) {
-        lastPixelCoords = null; // Clear last coords on mouse up
+        // If dragging finished, update the last *click* position
+        // to where the drag ended, for subsequent Shift+Clicks.
+        if (lastPixelCoords) {
+            lastClickCoords = { row: lastPixelCoords.row, col: lastPixelCoords.col };
+        }
+
+        lastPixelCoords = null; // Clear last drag coords on mouse up
         isDragging = false;
         currentDragMode = null;
+
         // If no change actually occurred during the click/drag, remove the state we optimistically saved
         if (!changeOccurred && history.length > 0) {
             history.pop();
-             // console.log(`No change detected, removed saved state. History size: ${history.length}`); // Debugging
+            // console.log(`No change detected (mouse up), removed saved state. History size: ${history.length}`); // Debugging
         }
         console.log("Dragging stopped.");
         changeOccurred = false; // Reset for next action
@@ -220,13 +258,19 @@ canvas.addEventListener('mouseleave', () => {
     }
 });
 
-// --- Undo Logic ---
+// --- Keyboard Listeners ---
 document.addEventListener('keydown', (event) => {
+    if (event.key === 'Shift') {
+        shiftKeyPressed = true;
+    }
+
     // Check for Cmd+Z on Mac or Ctrl+Z on other systems
     const isUndo = (event.metaKey || event.ctrlKey) && event.key === 'z';
 
     if (isUndo) {
         event.preventDefault(); // Prevent browser's default undo behavior
+        if (isDragging) return; // Don't allow undo while dragging
+
         if (history.length > 0) {
             gridState = history.pop(); // Restore the previous state
             drawGrid(); // Redraw the entire grid with the restored state
@@ -236,7 +280,13 @@ document.addEventListener('keydown', (event) => {
         }
     }
 });
-// --- End Undo Logic ---
+
+document.addEventListener('keyup', (event) => {
+    if (event.key === 'Shift') {
+        shiftKeyPressed = false;
+    }
+});
+// --- End Keyboard Listeners ---
 
 // --- Initial Setup ---
 initializeGridState();
