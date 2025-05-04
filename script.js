@@ -36,6 +36,13 @@ let currentDragMode = null; // 'draw' or 'erase' (pencil only for now)
 let isDrawingShape = false;
 let shapeStartX = null;
 let shapeStartY = null;
+
+// Selection State
+let selectionRect = null; // Stores { r1, c1, r2, c2 } of the selected area
+let isDefiningSelection = false;
+// let selectionBuffer = null; // For copy/paste data (add later)
+// let selectionOrigin = null; // Original top-left of buffer (add later)
+
 // --- End Palette & State ---
 
 // --- Utilities ---
@@ -322,6 +329,28 @@ function applyPixelsToGrid(pixels, colorIndex) {
 // --- End Shape Pixel Calculation ---
 
 // --- Preview Drawing ---
+function drawPreviewSelection(r1, c1, r2, c2) {
+    clearPreviewCanvas();
+
+    const minR = Math.min(r1, r2);
+    const maxR = Math.max(r1, r2);
+    const minC = Math.min(c1, c2);
+    const maxC = Math.max(c1, c2);
+
+    // Calculate pixel coordinates for the rectangle corners
+    const startX = spacing + minC * (pixelSize + spacing);
+    const startY = spacing + minR * (pixelSize + spacing);
+    const width = (maxC - minC + 1) * (pixelSize + spacing);
+    const height = (maxR - minR + 1) * (pixelSize + spacing);
+
+    // Draw a dashed rectangle (marching ants effect is more complex)
+    previewCtx.strokeStyle = 'black';
+    previewCtx.lineWidth = 1;
+    previewCtx.setLineDash([4, 2]); // Dashed line pattern
+    previewCtx.strokeRect(startX - spacing/2, startY - spacing/2, width, height);
+    previewCtx.setLineDash([]); // Reset line dash
+}
+
 function drawPreviewShape(r1, c1, r2, c2, tool) {
     clearPreviewCanvas();
     previewCtx.fillStyle = palette[selectedColorIndex];
@@ -351,12 +380,13 @@ canvas.addEventListener('mousedown', (event) => {
     changeOccurred = false;
     lastPixelCoords = null;
     const coords = getPixelCoords(event);
-    if (!coords) return; // Clicked outside grid
+    if (!coords) return;
 
     const { row, col } = coords;
-    shapeStartX = col; // Store grid coordinates
+    shapeStartX = col;
     shapeStartY = row;
-    isDrawingShape = false; // Reset flag
+    isDrawingShape = false;
+    isDefiningSelection = false; // Reset selection flag
 
     // --- Tool Specific Logic ---
     if (currentTool === 'pencil') {
@@ -400,6 +430,14 @@ canvas.addEventListener('mousedown', (event) => {
          history.push(deepCopyGrid(gridState));
          console.log(`Starting shape: ${currentTool}`);
          lastClickCoords = { row, col }; // Update last click
+    } else if (currentTool === 'select') {
+        // TODO: Check if clicking inside existing selection later for move
+        clearPreviewCanvas(); // Clear any previous selection outline
+        selectionRect = null; // Clear existing selection
+        isDefiningSelection = true;
+        isDragging = true; // Use isDragging to indicate selection definition is active
+        console.log("Starting selection definition.");
+        lastClickCoords = { row, col }; // Update last click
     } else {
         console.warn(`Tool not implemented: ${currentTool}`);
         isDrawingShape = false;
@@ -434,14 +472,21 @@ canvas.addEventListener('mousemove', (event) => {
             drawPreviewShape(shapeStartY, shapeStartX, row, col, currentTool);
              // lastPixelCoords is not needed here, we use shapeStartX/Y and current coords
             // --- End Shape Preview --- 
+        } else if (isDefiningSelection && currentTool === 'select') {
+            // --- Selection Preview --- 
+            drawPreviewSelection(shapeStartY, shapeStartX, row, col);
+            // --- End Selection Preview --- 
         }
     }
 });
 
-canvas.addEventListener('mouseup', () => {
-     clearPreviewCanvas(); // Always clear preview on mouseup
+canvas.addEventListener('mouseup', (event) => {
+     // Don't clear preview here for selection, we want it to persist
+     // clearPreviewCanvas();
 
     if (isDragging) {
+        let finalizeAction = false;
+
         if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
             // --- Finalize Shape Drawing --- 
             const coords = getPixelCoords(event); // Need end coords from event
@@ -467,29 +512,69 @@ canvas.addEventListener('mouseup', () => {
                  }
             }
             // --- End Finalize Shape --- 
+             finalizeAction = true; // A shape was potentially drawn
+        } else if (isDefiningSelection && currentTool === 'select') {
+            // --- Finalize Selection --- 
+            const coords = getPixelCoords(event);
+            if (coords && shapeStartX !== null && shapeStartY !== null) {
+                 const { row, col } = coords;
+                 // Ensure r1 <= r2 and c1 <= c2
+                 const r1 = Math.min(shapeStartY, row);
+                 const c1 = Math.min(shapeStartX, col);
+                 const r2 = Math.max(shapeStartY, row);
+                 const c2 = Math.max(shapeStartX, col);
+
+                 // Ignore tiny selections (optional)
+                 if (r1 === r2 && c1 === c2) {
+                     console.log("Selection too small, cancelled.");
+                     selectionRect = null;
+                     clearPreviewCanvas();
+                 } else {
+                     selectionRect = { r1, c1, r2, c2 };
+                     console.log(`Selection finalized: R(${r1}-${r2}), C(${c1}-${c2})`);
+                     // Draw persistent selection outline
+                     drawPreviewSelection(r1, c1, r2, c2);
+                     // TODO: Copy data to buffer later
+                 }
+            } else {
+                // Click without drag, or invalid coords?
+                selectionRect = null;
+                clearPreviewCanvas();
+            }
+            finalizeAction = true; // Selection action attempted
+             // --- End Finalize Selection --- 
+        } else if (currentTool === 'pencil') {
+            // Pencil drag finished, check if changes occurred
+            finalizeAction = true;
         }
 
-        // --- General Drag/Shape End Cleanup --- 
+        // --- General Drag/Shape/Selection End Cleanup --- 
         isDragging = false;
         isDrawingShape = false;
+        isDefiningSelection = false;
         shapeStartX = null;
         shapeStartY = null;
-        lastPixelCoords = null; // Clear pencil drag coords
-        currentDragMode = null; // Clear pencil drag mode
+        lastPixelCoords = null;
+        currentDragMode = null;
 
-        // History pop logic (applies if drag/shape started but made no change)
-        if (!changeOccurred && history.length > 0) {
+        // History pop logic
+        if (finalizeAction && !changeOccurred && history.length > 0) {
+             // If an action like shape drawing or pencil drag started
+             // but didn't result in a change, pop the state saved at mousedown
              history.pop();
-             console.log(`No change detected (mouseup), removed saved state. History size: ${history.length}`);
+             console.log(`No change detected (mouseup), removed saved state.`);
+        } else if (!finalizeAction) {
+            // If mouseup happened but no specific action was finalized (e.g., bucket click)
+            // We might still need to pop history if bucket didn't change anything
+            // This needs careful review based on when history is pushed for each tool
         }
         console.log("Action stopped (mouseup).");
         changeOccurred = false;
     }
 });
 
-canvas.addEventListener('mouseleave', () => {
+canvas.addEventListener('mouseleave', (event) => {
      clearPreviewCanvas(); // Clear preview if mouse leaves
-    // Stop dragging/shaping if mouse leaves the canvas
     if (isDragging) {
         // Similar cleanup logic as mouseup, potentially without finalizing shape
         if (isDrawingShape) {
@@ -500,6 +585,7 @@ canvas.addEventListener('mouseleave', () => {
 
          isDragging = false;
          isDrawingShape = false;
+         isDefiningSelection = false; // Reset selection flag
          shapeStartX = null;
          shapeStartY = null;
          lastPixelCoords = null;
@@ -508,7 +594,7 @@ canvas.addEventListener('mouseleave', () => {
         // Pop history if drag/shape started but no change occurred / was cancelled
         if (!changeOccurred && history.length > 0) {
             history.pop();
-             console.log(`No change detected (mouseleave), removed saved state. History size: ${history.length}`);
+             console.log(`No change detected (mouseleave), removed saved state.`);
         }
         changeOccurred = false;
         console.log("Action stopped (mouse left canvas).");
