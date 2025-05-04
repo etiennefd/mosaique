@@ -280,13 +280,14 @@ canvas.addEventListener('mouseleave', () => {
 
 // --- Keyboard Listeners ---
 document.addEventListener('keydown', (event) => {
-    if (event.key === 'Shift') {
-        shiftKeyPressed = true;
+    // Don't trigger shortcuts if focus is on an input element (future proofing)
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+        return;
     }
 
+    // --- Undo Logic ---
     // Check for Cmd+Z on Mac or Ctrl+Z on other systems
     const isUndo = (event.metaKey || event.ctrlKey) && event.key === 'z';
-
     if (isUndo) {
         event.preventDefault(); // Prevent browser's default undo behavior
         if (isDragging) return; // Don't allow undo while dragging
@@ -298,21 +299,51 @@ document.addEventListener('keydown', (event) => {
         } else {
             console.log("Nothing to undo.");
         }
+        return; // Stop processing if undo was handled
     }
+    // --- End Undo Logic ---
+
+    // --- Shift Key Tracking ---
+    if (event.key === 'Shift') {
+        shiftKeyPressed = true;
+        // No preventDefault needed here, shift often used by browser/OS
+        return; // Can stop processing here if only shift was pressed
+    }
+    // --- End Shift Key Tracking ---
+
+    // --- Color Selection Shortcuts (1-9) ---
+    const keyNum = parseInt(event.key, 10);
+    if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 9) {
+        const colorIndex = keyNum - 1; // Map 1-9 to index 0-8
+        if (colorIndex >= 0 && colorIndex < palette.length) {
+            event.preventDefault(); // Prevent typing the number if used as shortcut
+            selectedColorIndex = colorIndex;
+            updateSelectedSwatch(selectedColorIndex); // Update UI feedback
+            console.log(`Color selected via key ${keyNum}: index ${colorIndex}`);
+        }
+    }
+    // --- End Color Selection Shortcuts ---
+
 });
 
 document.addEventListener('keyup', (event) => {
     if (event.key === 'Shift') {
         shiftKeyPressed = false;
     }
+    // No preventDefault needed for keyup
 });
 // --- End Keyboard Listeners ---
 
 // --- UI Interaction (Options Panel) ---
+// Need access to updateSelectedSwatch, so declare it outside if possible or pass reference
+// For simplicity, keep it nested for now, but ensure setupOptionsPanel is called first.
+let updateSelectedSwatch = () => {}; // Placeholder
+
 function setupOptionsPanel() {
     const colorSwatches = document.querySelectorAll('.color-options .color-swatch');
 
-    function updateSelectedSwatch(newIndex) {
+    // Assign the actual function here
+    updateSelectedSwatch = (newIndex) => {
         // Remove selected class from previously selected swatch
         const oldSelected = document.querySelector('.color-options .color-swatch.selected');
         if (oldSelected) {
@@ -323,8 +354,8 @@ function setupOptionsPanel() {
         if (newSelected) {
             newSelected.classList.add('selected');
         }
-        console.log(`Color ${newIndex} (${palette[newIndex]}) selected.`);
-    }
+        // console.log(`Color ${newIndex} (${palette[newIndex]}) selected.`); // Log moved to keydown/click handlers
+    };
 
     colorSwatches.forEach((swatch, index) => {
         // Set initial background color from palette (redundant if already in HTML style, but safer)
@@ -333,6 +364,7 @@ function setupOptionsPanel() {
         swatch.addEventListener('click', () => {
             selectedColorIndex = index;
             updateSelectedSwatch(index);
+             console.log(`Color selected via click: index ${index}`);
         });
     });
 
