@@ -6,25 +6,36 @@ const gridRows = 200;
 const gridCols = 400;
 const pixelSize = 5;
 const spacing = 1;
-const defaultColor = '#E0E0E0'; // Light gray (inactive)
-const activeColor = '#0000FF';   // Deep bright blue (active)
-const backgroundColor = '#FFFFFF'; // White background to see spacing
+// const defaultColor = '#E0E0E0'; // Replaced by palette
+// const activeColor = '#0000FF';   // Replaced by palette
+const backgroundColor = '#FFFFFF'; // Canvas background, used for clearing
 // --- End Grid Configuration ---
 
-// --- State ---
-let gridState = []; // 2D array to store pixel state (0 for default, 1 for active)
+// --- Palette & State ---
+const palette = [
+    '#00008B', '#0000CD', '#4169E1', // Dark to Royal Blue
+    '#6495ED', '#ADD8E6',            // Cornflower to Light Blue
+    '#FFD700', '#EEE8AA',            // Gold, Pale Goldenrod
+    '#FFFFFF', '#E0E0E0'             // White, Pale Gray
+];
+const defaultPixelColorIndex = 8; // Index of default grid color (Pale Gray)
+const erasePixelColorIndex = 8;   // Index of color to use when "erasing" (Pale Gray)
+
+let selectedColorIndex = 0; // Default to the first color (Dark Blue)
+let gridState = []; // 2D array to store pixel state (now stores color index)
 let history = [];   // Array to store previous grid states for undo
 const MAX_HISTORY = 50; // Limit undo history size
 let isDragging = false;
 let lastPixelCoords = null; // Store the last {row, col} during drag
 let lastClickCoords = null; // Store the last {row, col} clicked for Shift+Click line
 let shiftKeyPressed = false; // Track if Shift key is pressed
-let currentDragMode = null; // 'draw' or 'erase'
-// --- End State ---
+let currentTool = 'pencil'; // Add state for the selected tool
+let currentDragMode = null; // 'draw' or 'erase' (pencil only for now)
+// --- End Palette & State ---
 
 // --- Utilities ---
 function deepCopyGrid(grid) {
-    // Simple deep copy for a 2D array of numbers
+    // Simple deep copy for a 2D array of numbers/indexes
     return grid.map(row => [...row]);
 }
 // --- End Utilities ---
@@ -44,7 +55,7 @@ function initializeGridState() {
     for (let r = 0; r < gridRows; r++) {
         gridState[r] = [];
         for (let c = 0; c < gridCols; c++) {
-            gridState[r][c] = 0; // 0 represents defaultColor
+            gridState[r][c] = defaultPixelColorIndex; // Initialize with the default color index
         }
     }
     console.log("Grid state initialized.");
@@ -60,7 +71,9 @@ function drawGrid() {
     // Draw pixels based on state
     for (let r = 0; r < gridRows; r++) {
         for (let c = 0; c < gridCols; c++) {
-            ctx.fillStyle = gridState[r][c] === 1 ? activeColor : defaultColor;
+            // Ensure the index is valid before accessing palette
+            const colorIndex = gridState[r][c];
+            ctx.fillStyle = palette[colorIndex] || palette[defaultPixelColorIndex]; // Fallback to default
             const x = spacing + c * (pixelSize + spacing);
             const y = spacing + r * (pixelSize + spacing);
             ctx.fillRect(x, y, pixelSize, pixelSize);
@@ -91,17 +104,22 @@ function getPixelCoords(event) {
 }
 
 function handlePixelChange(row, col, mode) {
-    const currentState = gridState[row][col];
-    const newState = (mode === 'draw') ? 1 : 0;
+    const currentPixelIndex = gridState[row][col];
+    let newPixelIndex;
 
-    if (currentState !== newState) {
-        gridState[row][col] = newState;
+    if (mode === 'draw') {
+        newPixelIndex = selectedColorIndex;
+    } else { // mode === 'erase'
+        newPixelIndex = erasePixelColorIndex; // Erase to the designated erase color (e.g., white)
+    }
+
+    if (currentPixelIndex !== newPixelIndex) {
+        gridState[row][col] = newPixelIndex;
         // Only redraw the single changed pixel for efficiency during drag
-        ctx.fillStyle = newState === 1 ? activeColor : defaultColor;
+        ctx.fillStyle = palette[newPixelIndex];
         const x = spacing + col * (pixelSize + spacing);
         const y = spacing + row * (pixelSize + spacing);
         ctx.fillRect(x, y, pixelSize, pixelSize);
-        // console.log(`Pixel (${row}, ${col}) changed to ${mode}`); // Optional: for debugging
         return true; // Indicate that a change was made
     }
     return false; // No change made
@@ -189,7 +207,9 @@ canvas.addEventListener('mousedown', (event) => {
             // console.log(`State saved (Drag Start). History size: ${history.length}`);
 
             // Determine mode based on the first pixel clicked
-            currentDragMode = (gridState[row][col] === 0) ? 'draw' : 'erase';
+            // If clicking on the currently selected color, erase. Otherwise, draw.
+            currentDragMode = (gridState[row][col] === selectedColorIndex) ? 'erase' : 'draw';
+
             if (handlePixelChange(row, col, currentDragMode)) {
                 changeOccurred = true;
             }
@@ -288,8 +308,48 @@ document.addEventListener('keyup', (event) => {
 });
 // --- End Keyboard Listeners ---
 
+// --- UI Interaction (Options Panel) ---
+function setupOptionsPanel() {
+    const colorSwatches = document.querySelectorAll('.color-options .color-swatch');
+
+    function updateSelectedSwatch(newIndex) {
+        // Remove selected class from previously selected swatch
+        const oldSelected = document.querySelector('.color-options .color-swatch.selected');
+        if (oldSelected) {
+            oldSelected.classList.remove('selected');
+        }
+        // Add selected class to the new swatch
+        const newSelected = document.getElementById(`color-${newIndex}`);
+        if (newSelected) {
+            newSelected.classList.add('selected');
+        }
+        console.log(`Color ${newIndex} (${palette[newIndex]}) selected.`);
+    }
+
+    colorSwatches.forEach((swatch, index) => {
+        // Set initial background color from palette (redundant if already in HTML style, but safer)
+        swatch.style.backgroundColor = palette[index];
+
+        swatch.addEventListener('click', () => {
+            selectedColorIndex = index;
+            updateSelectedSwatch(index);
+        });
+    });
+
+    // Set initial selection UI
+    updateSelectedSwatch(selectedColorIndex);
+
+    // TODO: Add tool selection listeners later
+    const pencilButton = document.getElementById('tool-pencil');
+    if (pencilButton) {
+        pencilButton.classList.add('selected'); // Default tool
+    }
+}
+// --- End UI Interaction ---
+
 // --- Initial Setup ---
 initializeGridState();
 drawGrid(); // Draw the initial grid
+setupOptionsPanel(); // Initialize the options panel listeners and UI
 console.log(`Drew initial ${gridRows}x${gridCols} grid.`);
 // --- End Initial Setup --- 
