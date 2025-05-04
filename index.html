@@ -4,7 +4,20 @@
     <title>Mosaique</title>
     <style>
         body { margin: 0; overflow: hidden; } /* Basic styling */
-        canvas { display: block; /* Remove border */ }
+        canvas {
+            display: block;
+            position: absolute; /* Position canvases absolutely */
+            top: 0;
+            left: 0;
+        }
+        #previewCanvas {
+            z-index: 5; /* Preview below options panel, above main */
+            pointer-events: none; /* Allow clicks to pass through to main canvas */
+        }
+        #mosaicCanvas {
+            z-index: 1;
+            background-color: #FFFFFF; /* Set background on main canvas */
+        }
 
         #options-panel {
             position: fixed;
@@ -84,6 +97,7 @@
 </head>
 <body>
     <canvas id="mosaicCanvas"></canvas>
+    <canvas id="previewCanvas"></canvas>
 
     <div id="options-panel">
         <div class="panel-section tool-options">

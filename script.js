@@ -1,5 +1,7 @@
 const canvas = document.getElementById('mosaicCanvas');
 const ctx = canvas.getContext('2d');
+const previewCanvas = document.getElementById('previewCanvas');
+const previewCtx = previewCanvas.getContext('2d');
 
 // --- Grid Configuration ---
 const gridRows = 200;
@@ -31,6 +33,9 @@ let lastClickCoords = null; // Store the last {row, col} clicked for Shift+Click
 let shiftKeyPressed = false; // Track if Shift key is pressed
 let currentTool = 'pencil'; // Default tool
 let currentDragMode = null; // 'draw' or 'erase' (pencil only for now)
+let isDrawingShape = false;
+let shapeStartX = null;
+let shapeStartY = null;
 // --- End Palette & State ---
 
 // --- Utilities ---
@@ -44,10 +49,13 @@ function deepCopyGrid(grid) {
 const canvasWidth = spacing + gridCols * (pixelSize + spacing);
 const canvasHeight = spacing + gridRows * (pixelSize + spacing);
 
+// Size both canvases
 canvas.width = canvasWidth;
 canvas.height = canvasHeight;
+previewCanvas.width = canvasWidth;
+previewCanvas.height = canvasHeight;
 
-console.log(`Canvas size set to ${canvasWidth}x${canvasHeight}`);
+console.log(`Main and Preview canvas size set to ${canvasWidth}x${canvasHeight}`);
 
 // --- Initialization ---
 function initializeGridState() {
@@ -80,6 +88,10 @@ function drawGrid() {
         }
     }
     // console.log("Grid redrawn."); // Optional: for debugging
+}
+
+function clearPreviewCanvas() {
+    previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
 }
 // --- End Drawing ---
 
@@ -224,6 +236,114 @@ function floodFill(startRow, startCol, fillColorIndex) {
 }
 // --- End Flood Fill Utility ---
 
+// --- Shape Pixel Calculation ---
+function getLinePixels(r1, c1, r2, c2) {
+    const pixels = [];
+    let dx = Math.abs(c2 - c1);
+    let dy = Math.abs(r2 - r1);
+    let sx = (c1 < c2) ? 1 : -1;
+    let sy = (r1 < r2) ? 1 : -1;
+    let err = dx - dy;
+    let currentCol = c1;
+    let currentRow = r1;
+
+    while (true) {
+        if (currentRow >= 0 && currentRow < gridRows && currentCol >= 0 && currentCol < gridCols) {
+             pixels.push([currentRow, currentCol]);
+        }
+        if ((currentCol === c2) && (currentRow === r2)) break;
+        let e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; currentCol += sx; }
+        if (e2 < dx) { err += dx; currentRow += sy; }
+    }
+    return pixels;
+}
+
+function getRectanglePixels(r1, c1, r2, c2) {
+    const pixels = [];
+    const minR = Math.min(r1, r2);
+    const maxR = Math.max(r1, r2);
+    const minC = Math.min(c1, c2);
+    const maxC = Math.max(c1, c2);
+
+    for (let r = minR; r <= maxR; r++) {
+        for (let c = minC; c <= maxC; c++) {
+            // Draw only the border
+            if (r === minR || r === maxR || c === minC || c === maxC) {
+                 if (r >= 0 && r < gridRows && c >= 0 && c < gridCols) {
+                    pixels.push([r, c]);
+                 }
+            }
+        }
+    }
+    return pixels;
+}
+
+function getCirclePixels(r1, c1, r2, c2) {
+    // Approximate circle using distance from center to corner as radius
+    const pixels = [];
+    const centerX = (c1 + c2) / 2;
+    const centerY = (r1 + r2) / 2;
+    const radiusX = Math.abs(c2 - c1) / 2;
+    const radiusY = Math.abs(r2 - r1) / 2;
+    const radius = Math.sqrt(radiusX * radiusX + radiusY * radiusY);
+    const centerGridC = Math.floor(centerX);
+    const centerGridR = Math.floor(centerY);
+    const radiusGrid = Math.ceil(radius);
+
+    // Iterate bounding box around center
+    for (let r = centerGridR - radiusGrid; r <= centerGridR + radiusGrid; r++) {
+        for (let c = centerGridC - radiusGrid; c <= centerGridC + radiusGrid; c++) {
+             if (r < 0 || r >= gridRows || c < 0 || c >= gridCols) continue;
+
+            // Check distance for pixels near the circumference
+            const dist = Math.sqrt(Math.pow(c - centerX, 2) + Math.pow(r - centerY, 2));
+            // Check if pixel is close to the ideal radius (within 0.8 grid units, adjust for look)
+            if (Math.abs(dist - radius) < 0.8) { // Threshold for thickness
+                pixels.push([r, c]);
+            }
+        }
+    }
+    // A more accurate Midpoint Circle Algorithm could be used here for better results
+    return pixels;
+}
+
+// Function to apply calculated pixels to the grid state
+function applyPixelsToGrid(pixels, colorIndex) {
+    let changed = false;
+    pixels.forEach(([r, c]) => {
+        if (gridState[r][c] !== colorIndex) {
+            gridState[r][c] = colorIndex;
+            changed = true;
+        }
+    });
+    return changed;
+}
+// --- End Shape Pixel Calculation ---
+
+// --- Preview Drawing ---
+function drawPreviewShape(r1, c1, r2, c2, tool) {
+    clearPreviewCanvas();
+    previewCtx.fillStyle = palette[selectedColorIndex];
+
+    let pixels = [];
+    if (tool === 'line') {
+        pixels = getLinePixels(r1, c1, r2, c2);
+    } else if (tool === 'rectangle') {
+        pixels = getRectanglePixels(r1, c1, r2, c2);
+    } else if (tool === 'circle') {
+        pixels = getCirclePixels(r1, c1, r2, c2);
+    }
+
+    // Draw the pixels on the preview canvas
+    pixels.forEach(([r, c]) => {
+        const x = spacing + c * (pixelSize + spacing);
+        const y = spacing + r * (pixelSize + spacing);
+        previewCtx.fillRect(x, y, pixelSize, pixelSize);
+    });
+}
+// --- End Preview Drawing ---
+
 // Flag to track if any pixel was actually changed during a mousedown/drag operation
 let changeOccurred = false;
 
@@ -231,111 +351,167 @@ canvas.addEventListener('mousedown', (event) => {
     changeOccurred = false;
     lastPixelCoords = null;
     const coords = getPixelCoords(event);
+    if (!coords) return; // Clicked outside grid
 
-    if (coords) {
-        const { row, col } = coords;
+    const { row, col } = coords;
+    shapeStartX = col; // Store grid coordinates
+    shapeStartY = row;
+    isDrawingShape = false; // Reset flag
 
-        // --- Tool Specific Logic ---
-        if (currentTool === 'pencil') {
-            if (shiftKeyPressed && lastClickCoords) {
-                // --- Shift+Click Line Logic (Pencil) --- 
-                isDragging = false;
-                // ... (History saving inside drawLineBetweenPixels for this specific case might be better)
-                // Let's simplify: save history *before* potential line draw
-                 if (history.length >= MAX_HISTORY) { history.shift(); }
-                 history.push(deepCopyGrid(gridState));
-
-                if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, row, col, 'draw')) {
-                    changeOccurred = true;
-                }
-                 if (!changeOccurred && history.length > 0) { history.pop(); } // Pop if no change
-
-                lastClickCoords = { row, col };
-                 // --- End Shift+Click Line --- 
-            } else {
-                // --- Normal Click/Drag Logic (Pencil) --- 
-                isDragging = true;
-                 // Save state *before* drag action starts
-                 if (history.length >= MAX_HISTORY) { history.shift(); }
-                 history.push(deepCopyGrid(gridState));
-
-                currentDragMode = (gridState[row][col] === selectedColorIndex) ? 'erase' : 'draw';
-                if (handlePixelChange(row, col, currentDragMode)) {
-                    changeOccurred = true;
-                }
-                lastPixelCoords = { row, col };
-                lastClickCoords = { row, col };
-                // --- End Normal Click/Drag --- 
+    // --- Tool Specific Logic ---
+    if (currentTool === 'pencil') {
+         isDrawingShape = false; // Pencil doesn't draw shapes
+         // ... (existing pencil logic: shift+click and drag start)
+         // ... (ensure history is saved here for pencil actions) ...
+         if (shiftKeyPressed && lastClickCoords) {
+            // Pencil Shift+Click Line
+            isDragging = false;
+            if (history.length >= MAX_HISTORY) { history.shift(); }
+            history.push(deepCopyGrid(gridState));
+            if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, row, col, 'draw')) {
+                changeOccurred = true;
             }
-        } else if (currentTool === 'bucket') {
-            isDragging = false; // No dragging for bucket tool
-            if (floodFill(row, col, selectedColorIndex)) {
-                 changeOccurred = true; // floodFill handles its own history saving
+            if (!changeOccurred && history.length > 0) { history.pop(); }
+            lastClickCoords = { row, col };
+         } else {
+            // Pencil Click/Drag Start
+            isDragging = true;
+            if (history.length >= MAX_HISTORY) { history.shift(); }
+            history.push(deepCopyGrid(gridState));
+            currentDragMode = (gridState[row][col] === selectedColorIndex) ? 'erase' : 'draw';
+            if (handlePixelChange(row, col, currentDragMode)) {
+                 changeOccurred = true;
             }
-             lastClickCoords = { row, col }; // Still update last click for potential tool switch + Shift+Click
-        } else {
-            console.warn(`Tool not implemented: ${currentTool}`);
-             isDragging = false;
-             lastClickCoords = { row, col };
+            lastPixelCoords = { row, col };
+            lastClickCoords = { row, col };
         }
-        // --- End Tool Specific Logic ---
+    } else if (currentTool === 'bucket') {
+        isDrawingShape = false;
+        isDragging = false;
+        if (floodFill(row, col, selectedColorIndex)) {
+            changeOccurred = true;
+        }
+        lastClickCoords = { row, col };
+    } else if (['line', 'rectangle', 'circle'].includes(currentTool)) {
+        isDrawingShape = true;
+        isDragging = true; // Use isDragging to indicate shape drawing is active
+         // Save state *before* shape drawing starts
+         if (history.length >= MAX_HISTORY) { history.shift(); }
+         history.push(deepCopyGrid(gridState));
+         console.log(`Starting shape: ${currentTool}`);
+         lastClickCoords = { row, col }; // Update last click
+    } else {
+        console.warn(`Tool not implemented: ${currentTool}`);
+        isDrawingShape = false;
+        isDragging = false;
+        lastClickCoords = { row, col };
     }
+    // --- End Tool Specific Logic ---
 });
 
 canvas.addEventListener('mousemove', (event) => {
     if (isDragging) {
         const coords = getPixelCoords(event);
-        if (coords && currentDragMode) {
-            if (lastPixelCoords && (coords.row !== lastPixelCoords.row || coords.col !== lastPixelCoords.col)) {
-                // Draw line from last coords to current coords
-                if (drawLineBetweenPixels(lastPixelCoords.row, lastPixelCoords.col, coords.row, coords.col, currentDragMode)) {
+        if (!coords) return;
+        const { row, col } = coords;
+
+        if (currentTool === 'pencil') {
+            // --- Pencil Drag Logic --- 
+             if (lastPixelCoords && (coords.row !== lastPixelCoords.row || coords.col !== lastPixelCoords.col)) {
+                if (drawLineBetweenPixels(lastPixelCoords.row, lastPixelCoords.col, row, col, currentDragMode)) {
                     changeOccurred = true;
                 }
             } else if (!lastPixelCoords) {
-                // Handle the very first pixel if not handled by mousedown (shouldn't usually happen here but safe)
-                if (handlePixelChange(coords.row, coords.col, currentDragMode)){
+                 // Safety net if mousedown didn't set lastPixelCoords
+                 if (handlePixelChange(row, col, currentDragMode)){
                      changeOccurred = true;
-                }
+                 }
             }
-            lastPixelCoords = { row: coords.row, col: coords.col }; // Update last coords
+            lastPixelCoords = { row: row, col: col };
+            // --- End Pencil Drag --- 
+        } else if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
+            // --- Shape Preview Logic --- 
+            drawPreviewShape(shapeStartY, shapeStartX, row, col, currentTool);
+             // lastPixelCoords is not needed here, we use shapeStartX/Y and current coords
+            // --- End Shape Preview --- 
         }
     }
 });
 
 canvas.addEventListener('mouseup', () => {
-    if (isDragging) {
-         // This block now only applies if a drag was actually started (e.g., pencil tool)
-        if (lastPixelCoords) {
-            lastClickCoords = { row: lastPixelCoords.row, col: lastPixelCoords.col };
-        }
-        lastPixelCoords = null;
-        isDragging = false;
-        currentDragMode = null;
+     clearPreviewCanvas(); // Always clear preview on mouseup
 
-        if (!changeOccurred && history.length > 0) {
-             // Check if the state saved was from this drag operation
-             // This might need refinement if Shift+Click saves state differently
-             // For now, assume the last history item corresponds to the drag start
-             history.pop();
+    if (isDragging) {
+        if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
+            // --- Finalize Shape Drawing --- 
+            const coords = getPixelCoords(event); // Need end coords from event
+            if (coords && shapeStartX !== null && shapeStartY !== null) {
+                 const { row, col } = coords;
+                 let pixels = [];
+                 if (currentTool === 'line') {
+                    pixels = getLinePixels(shapeStartY, shapeStartX, row, col);
+                 } else if (currentTool === 'rectangle') {
+                    pixels = getRectanglePixels(shapeStartY, shapeStartX, row, col);
+                 } else if (currentTool === 'circle') {
+                    pixels = getCirclePixels(shapeStartY, shapeStartX, row, col);
+                 }
+
+                 if (applyPixelsToGrid(pixels, selectedColorIndex)) {
+                    changeOccurred = true; // Mark change
+                    drawGrid(); // Redraw main canvas with the final shape
+                    console.log(`Shape ${currentTool} finalized.`);
+                 } else {
+                     // If applyPixelsToGrid didn't change anything (e.g., single point shape?)
+                     console.log("Shape resulted in no change.");
+                     changeOccurred = false; // Ensure flag is false if no change
+                 }
+            }
+            // --- End Finalize Shape --- 
         }
-        console.log("Dragging stopped.");
+
+        // --- General Drag/Shape End Cleanup --- 
+        isDragging = false;
+        isDrawingShape = false;
+        shapeStartX = null;
+        shapeStartY = null;
+        lastPixelCoords = null; // Clear pencil drag coords
+        currentDragMode = null; // Clear pencil drag mode
+
+        // History pop logic (applies if drag/shape started but made no change)
+        if (!changeOccurred && history.length > 0) {
+             history.pop();
+             console.log(`No change detected (mouseup), removed saved state. History size: ${history.length}`);
+        }
+        console.log("Action stopped (mouseup).");
         changeOccurred = false;
     }
 });
 
 canvas.addEventListener('mouseleave', () => {
-    // Stop dragging if mouse leaves the canvas
+     clearPreviewCanvas(); // Clear preview if mouse leaves
+    // Stop dragging/shaping if mouse leaves the canvas
     if (isDragging) {
-        lastPixelCoords = null; // Clear last coords on mouse leave
-        // Treat mouseleave like mouseup regarding history
+        // Similar cleanup logic as mouseup, potentially without finalizing shape
+        if (isDrawingShape) {
+             console.log("Shape drawing cancelled (mouse left).");
+             // Don't finalize shape, just discard
+             changeOccurred = false; // No change was finalized
+        }
+
+         isDragging = false;
+         isDrawingShape = false;
+         shapeStartX = null;
+         shapeStartY = null;
+         lastPixelCoords = null;
+         currentDragMode = null;
+
+        // Pop history if drag/shape started but no change occurred / was cancelled
         if (!changeOccurred && history.length > 0) {
             history.pop();
-            // console.log(`No change detected, removed saved state. History size: ${history.length}`); // Debugging
+             console.log(`No change detected (mouseleave), removed saved state. History size: ${history.length}`);
         }
-        isDragging = false;
-        currentDragMode = null;
         changeOccurred = false;
-        console.log("Dragging stopped (mouse left canvas).");
+        console.log("Action stopped (mouse left canvas).");
     }
 });
 
