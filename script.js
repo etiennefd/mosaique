@@ -16,6 +16,7 @@ let gridState = []; // 2D array to store pixel state (0 for default, 1 for activ
 let history = [];   // Array to store previous grid states for undo
 const MAX_HISTORY = 50; // Limit undo history size
 let isDragging = false;
+let lastPixelCoords = null; // Store the last {row, col} during drag
 let currentDragMode = null; // 'draw' or 'erase'
 // --- End State ---
 
@@ -104,11 +105,49 @@ function handlePixelChange(row, col, mode) {
     return false; // No change made
 }
 
+// --- Line Drawing Utility ---
+function drawLineBetweenPixels(r1, c1, r2, c2, mode) {
+    // Simple line drawing algorithm (like Bresenham's principle)
+    let dx = Math.abs(c2 - c1);
+    let dy = Math.abs(r2 - r1);
+    let sx = (c1 < c2) ? 1 : -1;
+    let sy = (r1 < r2) ? 1 : -1;
+    let err = dx - dy;
+
+    let currentCol = c1;
+    let currentRow = r1;
+
+    let changed = false;
+
+    while (true) {
+        // Apply change to the current pixel on the line
+        if (handlePixelChange(currentRow, currentCol, mode)) {
+             changed = true;
+        }
+
+        // Check if we've reached the end point
+        if ((currentCol === c2) && (currentRow === r2)) break;
+
+        let e2 = 2 * err;
+        if (e2 > -dy) {
+            err -= dy;
+            currentCol += sx;
+        }
+        if (e2 < dx) {
+            err += dx;
+            currentRow += sy;
+        }
+    }
+    return changed;
+}
+// --- End Line Drawing Utility ---
+
 // Flag to track if any pixel was actually changed during a mousedown/drag operation
 let changeOccurred = false;
 
 canvas.addEventListener('mousedown', (event) => {
     changeOccurred = false; // Reset flag for this action
+    lastPixelCoords = null; // Reset last coords for new drag
     const coords = getPixelCoords(event);
     if (coords) {
         isDragging = true;
@@ -126,6 +165,7 @@ canvas.addEventListener('mousedown', (event) => {
         if (handlePixelChange(row, col, currentDragMode)) {
             changeOccurred = true;
         }
+        lastPixelCoords = { row, col }; // Set starting point for line drawing
     }
 });
 
@@ -133,15 +173,25 @@ canvas.addEventListener('mousemove', (event) => {
     if (isDragging) {
         const coords = getPixelCoords(event);
         if (coords && currentDragMode) {
-             if (handlePixelChange(coords.row, coords.col, currentDragMode)) {
-                 changeOccurred = true;
-             }
+            if (lastPixelCoords && (coords.row !== lastPixelCoords.row || coords.col !== lastPixelCoords.col)) {
+                // Draw line from last coords to current coords
+                if (drawLineBetweenPixels(lastPixelCoords.row, lastPixelCoords.col, coords.row, coords.col, currentDragMode)) {
+                    changeOccurred = true;
+                }
+            } else if (!lastPixelCoords) {
+                // Handle the very first pixel if not handled by mousedown (shouldn't usually happen here but safe)
+                if (handlePixelChange(coords.row, coords.col, currentDragMode)){
+                     changeOccurred = true;
+                }
+            }
+            lastPixelCoords = { row: coords.row, col: coords.col }; // Update last coords
         }
     }
 });
 
 canvas.addEventListener('mouseup', () => {
     if (isDragging) {
+        lastPixelCoords = null; // Clear last coords on mouse up
         isDragging = false;
         currentDragMode = null;
         // If no change actually occurred during the click/drag, remove the state we optimistically saved
@@ -157,6 +207,7 @@ canvas.addEventListener('mouseup', () => {
 canvas.addEventListener('mouseleave', () => {
     // Stop dragging if mouse leaves the canvas
     if (isDragging) {
+        lastPixelCoords = null; // Clear last coords on mouse leave
         // Treat mouseleave like mouseup regarding history
         if (!changeOccurred && history.length > 0) {
             history.pop();
