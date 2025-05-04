@@ -4,7 +4,7 @@ const ctx = canvas.getContext('2d');
 // --- Grid Configuration ---
 const gridRows = 200;
 const gridCols = 400;
-const pixelSize = 7;
+const pixelSize = 6;
 const spacing = 1;
 const defaultColor = '#E0E0E0'; // Light gray (inactive)
 const activeColor = '#0000FF';   // Deep bright blue (active)
