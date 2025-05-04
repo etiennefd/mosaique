@@ -341,90 +341,109 @@ canvas.addEventListener('mouseleave', () => {
 
 // --- Keyboard Listeners ---
 document.addEventListener('keydown', (event) => {
-    // Don't trigger shortcuts if focus is on an input element (future proofing)
+    // Ignore shortcuts if modifiers (except Shift for potential future use) are pressed
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+    }
+
+    // Don't trigger shortcuts if focus is on an input element
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
         return;
     }
 
     // --- Undo Logic ---
-    // Check for Cmd+Z on Mac or Ctrl+Z on other systems
+    // Note: Undo (Cmd/Ctrl+Z) is handled *before* the modifier check above
+    // Let's move the Undo check logic back here, as it *requires* modifiers.
     const isUndo = (event.metaKey || event.ctrlKey) && event.key === 'z';
     if (isUndo) {
-        event.preventDefault(); // Prevent browser's default undo behavior
-        if (isDragging) return; // Don't allow undo while dragging
-
-        if (history.length > 0) {
-            gridState = history.pop(); // Restore the previous state
-            drawGrid(); // Redraw the entire grid with the restored state
-            console.log(`Undo executed. History size: ${history.length}`);
-        } else {
-            console.log("Nothing to undo.");
-        }
-        return; // Stop processing if undo was handled
+         event.preventDefault(); // Prevent browser's default undo behavior
+         if (isDragging) return; // Don't allow undo while dragging
+ 
+         if (history.length > 0) {
+             gridState = history.pop(); // Restore the previous state
+             drawGrid(); // Redraw the entire grid with the restored state
+             console.log(`Undo executed. History size: ${history.length}`);
+         } else {
+             console.log("Nothing to undo.");
+         }
+         return; // Stop processing if undo was handled
     }
     // --- End Undo Logic ---
 
-    // --- Shift Key Tracking ---
+     // --- Shift Key Tracking (for Shift+Click drawing, not shortcuts) ---
     if (event.key === 'Shift') {
-        shiftKeyPressed = true;
-        // No preventDefault needed here, shift often used by browser/OS
-        return; // Can stop processing here if only shift was pressed
+        // This needs to be tracked regardless of other modifiers or focused element
+        // We'll handle this in a separate listener or refine its logic if needed.
+        // For now, let's assume the existing keyup/keydown for shiftKeyPressed is okay.
+        // Let's move the actual tracking logic outside the main shortcut flow.
+        // shiftKeyPressed = true; // This might interfere, handle in its own check
+        // return; // Don't return here, allow Shift+Number etc.
     }
     // --- End Shift Key Tracking ---
 
-    // --- Tool Selection Shortcuts ---
-    if (event.key === 'g' || event.key === 'G') {
-        event.preventDefault();
-        updateSelectedTool('tool-bucket');
-        return; // Handled
-    }
-    if (event.key === 'b' || event.key === 'B' || event.key === 'p' || event.key === 'P') {
-        event.preventDefault();
-        updateSelectedTool('tool-pencil');
-        return; // Handled
-    }
-    if (event.key === 'l' || event.key === 'L') {
-        event.preventDefault();
-        updateSelectedTool('tool-line');
-        return; // Handled
-    }
-    if (event.key === 'r' || event.key === 'R') {
-        event.preventDefault();
-        updateSelectedTool('tool-rectangle');
-        return; // Handled
-    }
-     if (event.key === 'c' || event.key === 'C') {
-        event.preventDefault();
-        updateSelectedTool('tool-circle');
-        return; // Handled
-    }
-     if (event.key === 's' || event.key === 'S') {
-        event.preventDefault();
-        updateSelectedTool('tool-select');
-        return; // Handled
+    // --- Tool Selection Shortcuts (Lowercase only, no modifiers) ---
+    if (!event.shiftKey) { // Check that Shift is NOT pressed
+        if (event.key === 'g') {
+            event.preventDefault();
+            updateSelectedTool('tool-bucket');
+            return; // Handled
+        }
+        if (event.key === 'b' || event.key === 'p') { // Keep both b/p for pencil
+            event.preventDefault();
+            updateSelectedTool('tool-pencil');
+            return; // Handled
+        }
+        if (event.key === 'l') {
+            event.preventDefault();
+            updateSelectedTool('tool-line');
+            return; // Handled
+        }
+        if (event.key === 'r') {
+            event.preventDefault();
+            updateSelectedTool('tool-rectangle');
+            return; // Handled
+        }
+         if (event.key === 'c') {
+            event.preventDefault();
+            updateSelectedTool('tool-circle');
+            return; // Handled
+        }
+         if (event.key === 's') {
+            event.preventDefault();
+            updateSelectedTool('tool-select');
+            return; // Handled
+        }
     }
     // --- End Tool Selection Shortcuts ---
 
-    // --- Color Selection Shortcuts (1-9) ---
-    const keyNum = parseInt(event.key, 10);
-    if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 9) {
-        const colorIndex = keyNum - 1; // Map 1-9 to index 0-8
-        if (colorIndex >= 0 && colorIndex < palette.length) {
-            event.preventDefault(); // Prevent typing the number if used as shortcut
-            selectedColorIndex = colorIndex;
-            updateSelectedSwatch(selectedColorIndex); // Update UI feedback
-            console.log(`Color selected via key ${keyNum}: index ${colorIndex}`);
+    // --- Color Selection Shortcuts (1-9, no modifiers, no shift) ---
+    if (!event.shiftKey) { // Check that Shift is NOT pressed
+        const keyNum = parseInt(event.key, 10);
+        if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 9) {
+            const colorIndex = keyNum - 1; // Map 1-9 to index 0-8
+            if (colorIndex >= 0 && colorIndex < palette.length) {
+                event.preventDefault(); // Prevent typing the number if used as shortcut
+                selectedColorIndex = colorIndex;
+                updateSelectedSwatch(selectedColorIndex); // Update UI feedback
+                console.log(`Color selected via key ${keyNum}: index ${colorIndex}`);
+                return; // Handled
+            }
         }
     }
     // --- End Color Selection Shortcuts ---
 
 });
 
+// Separate listener specifically for Shift key state used in drawing logic
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Shift') {
+        shiftKeyPressed = true;
+    }
+});
 document.addEventListener('keyup', (event) => {
     if (event.key === 'Shift') {
         shiftKeyPressed = false;
     }
-    // No preventDefault needed for keyup
 });
 // --- End Keyboard Listeners ---
 
