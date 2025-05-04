@@ -60,8 +60,13 @@
         }
 
         .color-options {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
+             /* Keep padding/margin if needed, but display:flex moves */
+        }
+
+        /* New style for the inner container */
+        .color-swatch-container {
+            display: flex; /* Arrange items in a row */
+            flex-wrap: wrap;
             gap: 4px;
         }
 
@@ -92,15 +97,17 @@
         </div>
         <div class="panel-section color-options">
              <h4>Colors</h4>
-             <div class="color-swatch" id="color-0" style="background-color: #00008B;" title="Dark Blue"></div>
-             <div class="color-swatch" id="color-1" style="background-color: #0000CD;" title="Medium Blue"></div>
-             <div class="color-swatch" id="color-2" style="background-color: #4169E1;" title="Royal Blue"></div>
-             <div class="color-swatch" id="color-3" style="background-color: #6495ED;" title="Cornflower Blue"></div>
-             <div class="color-swatch" id="color-4" style="background-color: #ADD8E6;" title="Light Blue"></div>
-             <div class="color-swatch" id="color-5" style="background-color: #FFD700;" title="Gold"></div>
-             <div class="color-swatch" id="color-6" style="background-color: #EEE8AA;" title="Pale Goldenrod"></div>
-             <div class="color-swatch" id="color-7" style="background-color: #FFFFFF;" title="White"></div>
-             <div class="color-swatch" id="color-8" style="background-color: #E0E0E0;" title="Pale Gray"></div>
+             <div class="color-swatch-container">
+                 <div class="color-swatch" id="color-0" style="background-color: #00008B;" title="Dark Blue"></div>
+                 <div class="color-swatch" id="color-1" style="background-color: #0000CD;" title="Medium Blue"></div>
+                 <div class="color-swatch" id="color-2" style="background-color: #4169E1;" title="Royal Blue"></div>
+                 <div class="color-swatch" id="color-3" style="background-color: #6495ED;" title="Cornflower Blue"></div>
+                 <div class="color-swatch" id="color-4" style="background-color: #ADD8E6;" title="Light Blue"></div>
+                 <div class="color-swatch" id="color-5" style="background-color: #FFD700;" title="Gold"></div>
+                 <div class="color-swatch" id="color-6" style="background-color: #EEE8AA;" title="Pale Goldenrod"></div>
+                 <div class="color-swatch" id="color-7" style="background-color: #FFFFFF;" title="White"></div>
+                 <div class="color-swatch" id="color-8" style="background-color: #E0E0E0;" title="Pale Gray"></div>
+             </div>
         </div>
     </div>
 
