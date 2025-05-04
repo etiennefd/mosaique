@@ -29,7 +29,7 @@ let isDragging = false;
 let lastPixelCoords = null; // Store the last {row, col} during drag
 let lastClickCoords = null; // Store the last {row, col} clicked for Shift+Click line
 let shiftKeyPressed = false; // Track if Shift key is pressed
-let currentTool = 'pencil'; // Add state for the selected tool
+let currentTool = 'pencil'; // Default tool
 let currentDragMode = null; // 'draw' or 'erase' (pencil only for now)
 // --- End Palette & State ---
 
@@ -162,61 +162,123 @@ function drawLineBetweenPixels(r1, c1, r2, c2, mode) {
 }
 // --- End Line Drawing Utility ---
 
+// --- Flood Fill Utility ---
+function floodFill(startRow, startCol, fillColorIndex) {
+    const startColorIndex = gridState[startRow][startCol];
+
+    if (startColorIndex === fillColorIndex) {
+        console.log("Fill color is the same as start color, skipping fill.");
+        return false; // No change needed
+    }
+
+    // Save state before filling for undo
+    if (history.length >= MAX_HISTORY) {
+        history.shift();
+    }
+    history.push(deepCopyGrid(gridState));
+    console.log(`State saved (Flood Fill). History size: ${history.length}`);
+
+    const queue = [[startRow, startCol]]; // Queue of [row, col] pairs
+    let iterations = 0; // Safety break
+    const maxIterations = gridRows * gridCols * 3; // Generous limit
+
+    let pixelsChanged = 0;
+
+    while (queue.length > 0) {
+        if (iterations++ > maxIterations) {
+            console.error("Flood fill iteration limit reached!");
+            break;
+        }
+
+        const [row, col] = queue.shift();
+
+        // Bounds check and color check before processing
+        if (row < 0 || row >= gridRows || col < 0 || col >= gridCols || gridState[row][col] !== startColorIndex) {
+            continue;
+        }
+
+        // Change color and mark as processed (by changing color)
+        gridState[row][col] = fillColorIndex;
+        pixelsChanged++;
+
+        // Add neighbors to the queue
+        queue.push([row + 1, col]); // Down
+        queue.push([row - 1, col]); // Up
+        queue.push([row, col + 1]); // Right
+        queue.push([row, col - 1]); // Left
+    }
+
+    if (pixelsChanged > 0) {
+        drawGrid(); // Redraw the entire grid after fill
+        console.log(`Flood fill completed. ${pixelsChanged} pixels changed.`);
+        return true; // Indicate change occurred
+    } else {
+         // If no pixels were actually changed (e.g., hit iteration limit early), remove saved state
+        if (history.length > 0) {
+            history.pop();
+             console.log(`No change detected (Flood Fill), removed saved state. History size: ${history.length}`);
+        }
+        return false;
+    }
+
+}
+// --- End Flood Fill Utility ---
+
 // Flag to track if any pixel was actually changed during a mousedown/drag operation
 let changeOccurred = false;
 
 canvas.addEventListener('mousedown', (event) => {
-    changeOccurred = false; // Reset flag for this action
-    lastPixelCoords = null; // Reset last drag coords for new action
+    changeOccurred = false;
+    lastPixelCoords = null;
     const coords = getPixelCoords(event);
 
     if (coords) {
         const { row, col } = coords;
 
-        if (shiftKeyPressed && lastClickCoords) {
-            // --- Shift+Click Logic --- 
-            // Don't start dragging
-            isDragging = false;
-            // Save state before drawing the line
-            if (history.length >= MAX_HISTORY) {
-                history.shift();
-            }
-            history.push(deepCopyGrid(gridState));
-            // console.log(`State saved (Shift+Click). History size: ${history.length}`);
+        // --- Tool Specific Logic ---
+        if (currentTool === 'pencil') {
+            if (shiftKeyPressed && lastClickCoords) {
+                // --- Shift+Click Line Logic (Pencil) --- 
+                isDragging = false;
+                // ... (History saving inside drawLineBetweenPixels for this specific case might be better)
+                // Let's simplify: save history *before* potential line draw
+                 if (history.length >= MAX_HISTORY) { history.shift(); }
+                 history.push(deepCopyGrid(gridState));
 
-            // Draw line from last click to current click (always in 'draw' mode for now)
-            if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, row, col, 'draw')) {
-                changeOccurred = true;
-            }
+                if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, row, col, 'draw')) {
+                    changeOccurred = true;
+                }
+                 if (!changeOccurred && history.length > 0) { history.pop(); } // Pop if no change
 
-            // If no change actually occurred, pop the saved state
-            if (!changeOccurred && history.length > 0) {
-                history.pop();
-                // console.log(`No change detected (Shift+Click), removed saved state. History size: ${history.length}`);
+                lastClickCoords = { row, col };
+                 // --- End Shift+Click Line --- 
+            } else {
+                // --- Normal Click/Drag Logic (Pencil) --- 
+                isDragging = true;
+                 // Save state *before* drag action starts
+                 if (history.length >= MAX_HISTORY) { history.shift(); }
+                 history.push(deepCopyGrid(gridState));
+
+                currentDragMode = (gridState[row][col] === selectedColorIndex) ? 'erase' : 'draw';
+                if (handlePixelChange(row, col, currentDragMode)) {
+                    changeOccurred = true;
+                }
+                lastPixelCoords = { row, col };
+                lastClickCoords = { row, col };
+                // --- End Normal Click/Drag --- 
             }
-            lastClickCoords = { row, col }; // Update last click position AFTER drawing line
-             // --- End Shift+Click Logic ---
+        } else if (currentTool === 'bucket') {
+            isDragging = false; // No dragging for bucket tool
+            if (floodFill(row, col, selectedColorIndex)) {
+                 changeOccurred = true; // floodFill handles its own history saving
+            }
+             lastClickCoords = { row, col }; // Still update last click for potential tool switch + Shift+Click
         } else {
-            // --- Normal Click/Drag Logic --- 
-            isDragging = true; // Prepare for potential drag
-            // Save state *before* this action starts
-            if (history.length >= MAX_HISTORY) {
-                history.shift();
-            }
-            history.push(deepCopyGrid(gridState));
-            // console.log(`State saved (Drag Start). History size: ${history.length}`);
-
-            // Determine mode based on the first pixel clicked
-            // If clicking on the currently selected color, erase. Otherwise, draw.
-            currentDragMode = (gridState[row][col] === selectedColorIndex) ? 'erase' : 'draw';
-
-            if (handlePixelChange(row, col, currentDragMode)) {
-                changeOccurred = true;
-            }
-            lastPixelCoords = { row, col }; // Set starting point for line interpolation during drag
-            lastClickCoords = { row, col }; // Update last click position
-            // --- End Normal Click/Drag Logic ---
+            console.warn(`Tool not implemented: ${currentTool}`);
+             isDragging = false;
+             lastClickCoords = { row, col };
         }
+        // --- End Tool Specific Logic ---
     }
 });
 
@@ -242,23 +304,22 @@ canvas.addEventListener('mousemove', (event) => {
 
 canvas.addEventListener('mouseup', () => {
     if (isDragging) {
-        // If dragging finished, update the last *click* position
-        // to where the drag ended, for subsequent Shift+Clicks.
+         // This block now only applies if a drag was actually started (e.g., pencil tool)
         if (lastPixelCoords) {
             lastClickCoords = { row: lastPixelCoords.row, col: lastPixelCoords.col };
         }
-
-        lastPixelCoords = null; // Clear last drag coords on mouse up
+        lastPixelCoords = null;
         isDragging = false;
         currentDragMode = null;
 
-        // If no change actually occurred during the click/drag, remove the state we optimistically saved
         if (!changeOccurred && history.length > 0) {
-            history.pop();
-            // console.log(`No change detected (mouse up), removed saved state. History size: ${history.length}`); // Debugging
+             // Check if the state saved was from this drag operation
+             // This might need refinement if Shift+Click saves state differently
+             // For now, assume the last history item corresponds to the drag start
+             history.pop();
         }
         console.log("Dragging stopped.");
-        changeOccurred = false; // Reset for next action
+        changeOccurred = false;
     }
 });
 
@@ -311,6 +372,20 @@ document.addEventListener('keydown', (event) => {
     }
     // --- End Shift Key Tracking ---
 
+    // --- Tool Selection Shortcuts ---
+    if (event.key === 'g' || event.key === 'G') {
+        event.preventDefault();
+        updateSelectedTool('tool-bucket');
+        return; // Handled
+    }
+    if (event.key === 'b' || event.key === 'B' || event.key === 'p' || event.key === 'P') { // Added B and P for pencil
+        event.preventDefault();
+        updateSelectedTool('tool-pencil'); // Now accessible
+        return; // Handled
+    }
+    // Add other tool shortcuts here later
+    // --- End Tool Selection Shortcuts ---
+
     // --- Color Selection Shortcuts (1-9) ---
     const keyNum = parseInt(event.key, 10);
     if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 9) {
@@ -335,11 +410,13 @@ document.addEventListener('keyup', (event) => {
 // --- End Keyboard Listeners ---
 
 // --- UI Interaction (Options Panel) ---
-// Need access to updateSelectedSwatch, so declare it outside if possible or pass reference
-// For simplicity, keep it nested for now, but ensure setupOptionsPanel is called first.
+// Need access to updateSelectedSwatch/Tool, so declare them outside if possible or pass reference
+// For simplicity, keep them nested for now, but ensure setupOptionsPanel is called first.
 let updateSelectedSwatch = () => {}; // Placeholder
+let updateSelectedTool = () => {};   // Placeholder
 
 function setupOptionsPanel() {
+    const toolButtons = document.querySelectorAll('.tool-options button');
     const colorSwatches = document.querySelectorAll('.color-options .color-swatch');
 
     // Assign the actual function here
@@ -357,6 +434,25 @@ function setupOptionsPanel() {
         // console.log(`Color ${newIndex} (${palette[newIndex]}) selected.`); // Log moved to keydown/click handlers
     };
 
+    // Assign the actual function here
+    updateSelectedTool = (newToolId) => {
+        // Remove selected class from all tool buttons
+        toolButtons.forEach(btn => btn.classList.remove('selected'));
+        // Add selected class to the clicked button
+        const selectedButton = document.getElementById(newToolId);
+        if (selectedButton) {
+            selectedButton.classList.add('selected');
+        }
+        currentTool = newToolId.replace('tool-', ''); // Extract tool name
+        console.log(`Tool selected: ${currentTool}`);
+    };
+
+    toolButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            updateSelectedTool(button.id);
+        });
+    });
+
     colorSwatches.forEach((swatch, index) => {
         // Set initial background color from palette (redundant if already in HTML style, but safer)
         swatch.style.backgroundColor = palette[index];
@@ -368,14 +464,10 @@ function setupOptionsPanel() {
         });
     });
 
-    // Set initial selection UI
+    // Set initial selections
     updateSelectedSwatch(selectedColorIndex);
+    updateSelectedTool(`tool-${currentTool}`); // Set initial tool UI
 
-    // TODO: Add tool selection listeners later
-    const pencilButton = document.getElementById('tool-pencil');
-    if (pencilButton) {
-        pencilButton.classList.add('selected'); // Default tool
-    }
 }
 // --- End UI Interaction ---
 
