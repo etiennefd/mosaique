@@ -40,8 +40,10 @@ let shapeStartY = null;
 // Selection State
 let selectionRect = null; // Stores { r1, c1, r2, c2 } of the selected area
 let isDefiningSelection = false;
-// let selectionBuffer = null; // For copy/paste data (add later)
-// let selectionOrigin = null; // Original top-left of buffer (add later)
+let isMovingSelection = false;   // Track if currently moving the selection
+let selectionBuffer = null;    // Stores the pixel data { width, height, data: [[index,...],...] }
+let moveStartCoords = null;    // Store {row, col} where move drag started
+let moveOffset = null;         // Store {dr, dc} offset from top-left corner to mouse click
 
 // --- End Palette & State ---
 
@@ -328,9 +330,98 @@ function applyPixelsToGrid(pixels, colorIndex) {
 }
 // --- End Shape Pixel Calculation ---
 
+// --- Selection Utilities ---
+function isInsideRect(row, col, rect) {
+    return rect && row >= rect.r1 && row <= rect.r2 && col >= rect.c1 && col <= rect.c2;
+}
+
+function copySelectionToBuffer() {
+    if (!selectionRect) return false;
+
+    const { r1, c1, r2, c2 } = selectionRect;
+    const height = r2 - r1 + 1;
+    const width = c2 - c1 + 1;
+    const data = [];
+
+    for (let r = 0; r < height; r++) {
+        data[r] = [];
+        for (let c = 0; c < width; c++) {
+            const sourceRow = r1 + r;
+            const sourceCol = c1 + c;
+            // Check bounds just in case selection rect is somehow invalid
+            if (sourceRow >= 0 && sourceRow < gridRows && sourceCol >= 0 && sourceCol < gridCols) {
+                 data[r][c] = gridState[sourceRow][sourceCol];
+            } else {
+                 data[r][c] = defaultPixelColorIndex; // Fallback
+            }
+        }
+    }
+
+    selectionBuffer = { width, height, data };
+    console.log(`Copied selection ${width}x${height} to buffer.`);
+    return true;
+}
+
+function eraseGridArea(rect) {
+    if (!rect) return false;
+    const { r1, c1, r2, c2 } = rect;
+    let changed = false;
+    for (let r = r1; r <= r2; r++) {
+        for (let c = c1; c <= c2; c++) {
+            if (r >= 0 && r < gridRows && c >= 0 && c < gridCols) {
+                if (gridState[r][c] !== erasePixelColorIndex) {
+                    gridState[r][c] = erasePixelColorIndex;
+                    changed = true;
+                }
+            }
+        }
+    }
+     console.log(`Erased grid area R(${r1}-${r2}), C(${c1}-${c2})`);
+     return changed;
+}
+
+function pasteBufferToGrid(targetTopRow, targetLeftCol) {
+    if (!selectionBuffer) return false;
+
+    const { width, height, data } = selectionBuffer;
+    let changed = false;
+
+    for (let r = 0; r < height; r++) {
+        for (let c = 0; c < width; c++) {
+            const targetRow = targetTopRow + r;
+            const targetCol = targetLeftCol + c;
+
+            if (targetRow >= 0 && targetRow < gridRows && targetCol >= 0 && targetCol < gridCols) {
+                if (gridState[targetRow][targetCol] !== data[r][c]) {
+                     gridState[targetRow][targetCol] = data[r][c];
+                     changed = true;
+                }
+            }
+        }
+    }
+    console.log(`Pasted buffer ${width}x${height} at (${targetTopRow}, ${targetLeftCol})`);
+    return changed;
+}
+// --- End Selection Utilities ---
+
 // --- Preview Drawing ---
+function eraseAreaOnPreview(rect) {
+    if (!rect) return;
+    const { r1, c1, r2, c2 } = rect;
+    previewCtx.fillStyle = palette[erasePixelColorIndex];
+    for (let r = r1; r <= r2; r++) {
+        for (let c = c1; c <= c2; c++) {
+            if (r >= 0 && r < gridRows && c >= 0 && c < gridCols) {
+                const x = spacing + c * (pixelSize + spacing);
+                const y = spacing + r * (pixelSize + spacing);
+                previewCtx.fillRect(x, y, pixelSize, pixelSize);
+            }
+        }
+    }
+}
+
 function drawPreviewSelection(r1, c1, r2, c2) {
-    clearPreviewCanvas();
+    // clearPreviewCanvas(); // REMOVED: Clearing is handled by caller
 
     const minR = Math.min(r1, r2);
     const maxR = Math.max(r1, r2);
@@ -351,8 +442,28 @@ function drawPreviewSelection(r1, c1, r2, c2) {
     previewCtx.setLineDash([]); // Reset line dash
 }
 
+function drawBufferOnPreview(targetTopRow, targetLeftCol) {
+    if (!selectionBuffer) return;
+    const { width, height, data } = selectionBuffer;
+
+    for (let r = 0; r < height; r++) {
+        for (let c = 0; c < width; c++) {
+            const pixelIndex = data[r][c];
+            const color = palette[pixelIndex];
+            const x = spacing + (targetLeftCol + c) * (pixelSize + spacing);
+            const y = spacing + (targetTopRow + r) * (pixelSize + spacing);
+
+            // Basic check to avoid drawing outside canvas bounds if buffer is moved partially off
+             if (targetTopRow + r >= 0 && targetTopRow + r < gridRows && targetLeftCol + c >= 0 && targetLeftCol + c < gridCols) {
+                 previewCtx.fillStyle = color;
+                 previewCtx.fillRect(x, y, pixelSize, pixelSize);
+             }
+        }
+    }
+}
+
 function drawPreviewShape(r1, c1, r2, c2, tool) {
-    clearPreviewCanvas();
+    // clearPreviewCanvas(); // REMOVED: Clearing is handled by caller
     previewCtx.fillStyle = palette[selectedColorIndex];
 
     let pixels = [];
@@ -386,7 +497,8 @@ canvas.addEventListener('mousedown', (event) => {
     shapeStartX = col;
     shapeStartY = row;
     isDrawingShape = false;
-    isDefiningSelection = false; // Reset selection flag
+    isDefiningSelection = false;
+    isMovingSelection = false; // Reset move flag
 
     // --- Tool Specific Logic ---
     if (currentTool === 'pencil') {
@@ -431,13 +543,33 @@ canvas.addEventListener('mousedown', (event) => {
          console.log(`Starting shape: ${currentTool}`);
          lastClickCoords = { row, col }; // Update last click
     } else if (currentTool === 'select') {
-        // TODO: Check if clicking inside existing selection later for move
-        clearPreviewCanvas(); // Clear any previous selection outline
-        selectionRect = null; // Clear existing selection
-        isDefiningSelection = true;
-        isDragging = true; // Use isDragging to indicate selection definition is active
-        console.log("Starting selection definition.");
-        lastClickCoords = { row, col }; // Update last click
+        if (selectionRect && isInsideRect(row, col, selectionRect)) {
+            // --- Start Moving Selection --- 
+            isMovingSelection = true;
+            isDragging = true; // Use isDragging for move events
+            moveStartCoords = { row, col };
+            // Calculate offset from top-left corner of selection
+            moveOffset = { dr: row - selectionRect.r1, dc: col - selectionRect.c1 };
+
+            copySelectionToBuffer(); // Copy data for the move
+
+            // Save state *before* move starts (for undo)
+            if (history.length >= MAX_HISTORY) { history.shift(); }
+            history.push(deepCopyGrid(gridState));
+            console.log("Starting selection move.");
+            // No change yet, changeOccurred = false
+            // --- End Start Moving --- 
+        } else {
+             // --- Start Defining Selection --- 
+            clearPreviewCanvas(); // Clear previous selection outline if any
+            selectionRect = null; // Clear existing selection
+            selectionBuffer = null; // Clear buffer if starting new selection
+            isDefiningSelection = true;
+            isDragging = true;
+            console.log("Starting selection definition.");
+            // --- End Start Defining --- 
+        }
+        lastClickCoords = { row, col };
     } else {
         console.warn(`Tool not implemented: ${currentTool}`);
         isDrawingShape = false;
@@ -469,23 +601,42 @@ canvas.addEventListener('mousemove', (event) => {
             // --- End Pencil Drag --- 
         } else if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
             // --- Shape Preview Logic --- 
+            clearPreviewCanvas(); // Clear before drawing shape preview
             drawPreviewShape(shapeStartY, shapeStartX, row, col, currentTool);
              // lastPixelCoords is not needed here, we use shapeStartX/Y and current coords
             // --- End Shape Preview --- 
         } else if (isDefiningSelection && currentTool === 'select') {
             // --- Selection Preview --- 
+            clearPreviewCanvas(); // <<<< ADD THIS LINE BACK HERE
             drawPreviewSelection(shapeStartY, shapeStartX, row, col);
             // --- End Selection Preview --- 
+        } else if (isMovingSelection && currentTool === 'select') {
+             // --- Selection Move Preview --- 
+             if (selectionBuffer && moveOffset && selectionRect) { // Ensure selectionRect exists
+                const newTopLeftRow = row - moveOffset.dr;
+                const newTopLeftCol = col - moveOffset.dc;
+
+                clearPreviewCanvas();
+                // Erase the *original* selection area on the preview first
+                eraseAreaOnPreview(selectionRect);
+
+                // Draw buffer content at new position
+                drawBufferOnPreview(newTopLeftRow, newTopLeftCol);
+
+                // Draw selection outline at new position
+                const r2 = newTopLeftRow + selectionBuffer.height - 1;
+                const c2 = newTopLeftCol + selectionBuffer.width - 1;
+                drawPreviewSelection(newTopLeftRow, newTopLeftCol, r2, c2);
+             }
+             // --- End Move Preview --- 
         }
     }
 });
 
 canvas.addEventListener('mouseup', (event) => {
-     // Don't clear preview here for selection, we want it to persist
-     // clearPreviewCanvas();
-
     if (isDragging) {
         let finalizeAction = false;
+        let actionMadeChange = false; // Track if the finalized action modified gridState
 
         if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
             // --- Finalize Shape Drawing --- 
@@ -512,6 +663,7 @@ canvas.addEventListener('mouseup', (event) => {
                  }
             }
             // --- End Finalize Shape --- 
+             actionMadeChange = changeOccurred;
              finalizeAction = true; // A shape was potentially drawn
         } else if (isDefiningSelection && currentTool === 'select') {
             // --- Finalize Selection --- 
@@ -543,59 +695,117 @@ canvas.addEventListener('mouseup', (event) => {
             }
             finalizeAction = true; // Selection action attempted
              // --- End Finalize Selection --- 
-        } else if (currentTool === 'pencil') {
-            // Pencil drag finished, check if changes occurred
+        } else if (isMovingSelection && currentTool === 'select') {
+            // --- Finalize Selection Move --- 
+            clearPreviewCanvas();
+            const coords = getPixelCoords(event);
+            if (coords && selectionBuffer && moveOffset) {
+                 const { row, col } = coords;
+                 const finalTopLeftRow = row - moveOffset.dr;
+                 const finalTopLeftCol = col - moveOffset.dc;
+
+                 // Erase the original area
+                 const eraseChanged = eraseGridArea(selectionRect);
+                 // Paste the buffer at the new location
+                 const pasteChanged = pasteBufferToGrid(finalTopLeftRow, finalTopLeftCol);
+
+                 if (eraseChanged || pasteChanged) {
+                    actionMadeChange = true;
+                    drawGrid(); // Redraw main canvas only if changes were made
+                 }
+
+                 // Update selectionRect to the new position
+                 selectionRect = {
+                    r1: finalTopLeftRow,
+                    c1: finalTopLeftCol,
+                    r2: finalTopLeftRow + selectionBuffer.height - 1,
+                    c2: finalTopLeftCol + selectionBuffer.width - 1
+                 };
+                 // Redraw the persistent selection outline at the new position
+                 drawPreviewSelection(selectionRect.r1, selectionRect.c1, selectionRect.r2, selectionRect.c2);
+                 console.log(`Selection moved to R(${selectionRect.r1}-${selectionRect.r2}), C(${selectionRect.c1}-${selectionRect.c2})`);
+            }
             finalizeAction = true;
+            // --- End Finalize Move --- 
+        } else if (currentTool === 'pencil') {
+            actionMadeChange = changeOccurred;
+            finalizeAction = true;
+        } else if (currentTool === 'bucket') {
+            // Bucket finalize logic might need checking if floodFill returned true
+             actionMadeChange = changeOccurred; // Assuming changeOccurred was set by floodFill
+             finalizeAction = true;
         }
 
         // --- General Drag/Shape/Selection End Cleanup --- 
         isDragging = false;
         isDrawingShape = false;
         isDefiningSelection = false;
+        isMovingSelection = false; // Reset move flag
         shapeStartX = null;
         shapeStartY = null;
         lastPixelCoords = null;
         currentDragMode = null;
+        moveStartCoords = null; // Reset move coords
+        moveOffset = null;
 
         // History pop logic
-        if (finalizeAction && !changeOccurred && history.length > 0) {
-             // If an action like shape drawing or pencil drag started
-             // but didn't result in a change, pop the state saved at mousedown
+        if (finalizeAction && !actionMadeChange && history.length > 0) {
+             // If an action started (history pushed) but didn't change the grid,
+             // pop the state saved at mousedown
              history.pop();
-             console.log(`No change detected (mouseup), removed saved state.`);
-        } else if (!finalizeAction) {
-            // If mouseup happened but no specific action was finalized (e.g., bucket click)
-            // We might still need to pop history if bucket didn't change anything
-            // This needs careful review based on when history is pushed for each tool
+             console.log(`Action finalized with no change, removed saved state.`);
         }
         console.log("Action stopped (mouseup).");
-        changeOccurred = false;
+        changeOccurred = false; // Reset for next action
     }
 });
 
 canvas.addEventListener('mouseleave', (event) => {
-     clearPreviewCanvas(); // Clear preview if mouse leaves
+     clearPreviewCanvas();
     if (isDragging) {
-        // Similar cleanup logic as mouseup, potentially without finalizing shape
-        if (isDrawingShape) {
-             console.log("Shape drawing cancelled (mouse left).");
-             // Don't finalize shape, just discard
-             changeOccurred = false; // No change was finalized
+        if (isMovingSelection) {
+            console.log("Selection move cancelled (mouse left).");
+            changeOccurred = false; // No change was finalized
+            // IMPORTANT: Need to restore the original state from history here
+            // because the buffer was copied but not pasted back.
+             if (history.length > 0) {
+                gridState = history.pop(); // Restore the state saved before move started
+                drawGrid(); // Redraw the restored state
+                 console.log(`Restored state from history (move cancelled). History size: ${history.length}`);
+             } else {
+                 console.warn("Cannot restore state on move cancel, history empty!");
+             }
+             // Redraw old selection outline if needed?
+             if (selectionRect) {
+                 drawPreviewSelection(selectionRect.r1, selectionRect.c1, selectionRect.r2, selectionRect.c2);
+             }
+
+        } else if (isDefiningSelection || isDrawingShape) {
+             console.log("Action cancelled (mouse left).");
+             changeOccurred = false;
+             // Pop history if shape/selection definition started
+             if (history.length > 0) {
+                 // Should only pop if history was pushed for *this* action
+                 // This logic assumes the last history item is always the relevant one
+                 history.pop();
+                 console.log(`Removed history state (action cancelled). History size: ${history.length}`);
+             }
         }
 
-         isDragging = false;
-         isDrawingShape = false;
-         isDefiningSelection = false; // Reset selection flag
-         shapeStartX = null;
-         shapeStartY = null;
-         lastPixelCoords = null;
-         currentDragMode = null;
+        isDragging = false;
+        isDrawingShape = false;
+        isDefiningSelection = false;
+        isMovingSelection = false; // Reset move flag
+        shapeStartX = null;
+        shapeStartY = null;
+        lastPixelCoords = null;
+        currentDragMode = null;
+        moveStartCoords = null; // Reset move coords
+        moveOffset = null;
+        selectionBuffer = null; // Clear buffer on cancel
 
-        // Pop history if drag/shape started but no change occurred / was cancelled
-        if (!changeOccurred && history.length > 0) {
-            history.pop();
-             console.log(`No change detected (mouseleave), removed saved state.`);
-        }
+        // General history pop check (redundant? covered above)
+        // if (!changeOccurred && history.length > 0) { history.pop(); ... }
         changeOccurred = false;
         console.log("Action stopped (mouse left canvas).");
     }
