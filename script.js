@@ -832,7 +832,89 @@ document.addEventListener('keydown', (event) => {
     }
     // --- End Undo Logic ---
 
-    // Ignore shortcuts if other modifiers are pressed
+    // --- Copy/Cut/Paste Logic (Requires Modifiers) ---
+    const isCopy = (event.metaKey || event.ctrlKey) && event.key === 'c';
+    const isCut = (event.metaKey || event.ctrlKey) && event.key === 'x';
+    const isPaste = (event.metaKey || event.ctrlKey) && event.key === 'v';
+
+    if (isCopy && currentTool === 'select' && selectionRect) {
+        event.preventDefault();
+        if (copySelectionToBuffer()) {
+            console.log("Selection copied to buffer.");
+        } else {
+            console.warn("Failed to copy selection.");
+        }
+        // Copy doesn't modify grid, no history push, no return needed unless we want to block other actions
+    }
+
+    if (isCut && currentTool === 'select' && selectionRect) {
+        event.preventDefault();
+        // Save state *before* cut
+        if (history.length >= MAX_HISTORY) { history.shift(); }
+        history.push(deepCopyGrid(gridState));
+        console.log(`State saved (Cut). History size: ${history.length}`);
+
+        if (copySelectionToBuffer()) {
+            if (eraseGridArea(selectionRect)) {
+                drawGrid(); // Redraw after erasing
+                // Keep selection outline visible after cut
+                clearPreviewCanvas(); // Clear the selection outline
+                const cutRect = selectionRect; // Store temporarily for log
+                selectionRect = null; // Selection is gone from original place
+                console.log(`Selection cut R(${cutRect.r1}-${cutRect.r2}), C(${cutRect.c1}-${cutRect.c2}) to buffer.`);
+            } else {
+                 console.warn("Failed to erase area during cut.");
+                 // If erase failed, pop the history state we just pushed
+                 if (history.length > 0) { history.pop(); }
+            }
+        } else {
+            console.warn("Failed to copy selection during cut.");
+             // If copy failed, pop the history state we just pushed
+             if (history.length > 0) { history.pop(); }
+        }
+        return; // Stop processing if cut was handled
+    }
+
+    if (isPaste && selectionBuffer) { // Paste can happen regardless of current tool
+        event.preventDefault();
+        // Determine paste location (using lastClickCoords for now)
+        let targetRow, targetCol;
+        if (lastClickCoords) {
+            targetRow = lastClickCoords.row;
+            targetCol = lastClickCoords.col;
+        } else {
+            // Default to top-left if no click recorded
+            targetRow = 0;
+            targetCol = 0;
+        }
+
+        // Save state *before* paste
+        if (history.length >= MAX_HISTORY) { history.shift(); }
+        history.push(deepCopyGrid(gridState));
+        console.log(`State saved (Paste). History size: ${history.length}`);
+
+        if (pasteBufferToGrid(targetRow, targetCol)) {
+            // Update selectionRect to the newly pasted area
+            selectionRect = {
+                r1: targetRow,
+                c1: targetCol,
+                r2: targetRow + selectionBuffer.height - 1,
+                c2: targetCol + selectionBuffer.width - 1
+            };
+            drawGrid(); // Redraw after pasting
+            // Draw selection outline around the pasted area
+            drawPreviewSelection(selectionRect.r1, selectionRect.c1, selectionRect.r2, selectionRect.c2);
+            console.log("Pasted from buffer.");
+        } else {
+             console.warn("Paste did not change anything.");
+              // If paste failed/made no change, pop history
+              if (history.length > 0) { history.pop(); }
+        }
+        return; // Stop processing if paste was handled
+    }
+    // --- End Copy/Cut/Paste --- 
+
+    // Ignore shortcuts if other modifiers are pressed (This check must be AFTER C/X/V checks)
     if (event.metaKey || event.ctrlKey || event.altKey) {
         return;
     }
