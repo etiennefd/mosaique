@@ -378,12 +378,31 @@ document.addEventListener('keydown', (event) => {
         updateSelectedTool('tool-bucket');
         return; // Handled
     }
-    if (event.key === 'b' || event.key === 'B' || event.key === 'p' || event.key === 'P') { // Added B and P for pencil
+    if (event.key === 'b' || event.key === 'B' || event.key === 'p' || event.key === 'P') {
         event.preventDefault();
-        updateSelectedTool('tool-pencil'); // Now accessible
+        updateSelectedTool('tool-pencil');
         return; // Handled
     }
-    // Add other tool shortcuts here later
+    if (event.key === 'l' || event.key === 'L') {
+        event.preventDefault();
+        updateSelectedTool('tool-line');
+        return; // Handled
+    }
+    if (event.key === 'r' || event.key === 'R') {
+        event.preventDefault();
+        updateSelectedTool('tool-rectangle');
+        return; // Handled
+    }
+     if (event.key === 'c' || event.key === 'C') {
+        event.preventDefault();
+        updateSelectedTool('tool-circle');
+        return; // Handled
+    }
+     if (event.key === 's' || event.key === 'S') {
+        event.preventDefault();
+        updateSelectedTool('tool-select');
+        return; // Handled
+    }
     // --- End Tool Selection Shortcuts ---
 
     // --- Color Selection Shortcuts (1-9) ---
