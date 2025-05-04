@@ -603,27 +603,17 @@ canvas.addEventListener('mouseleave', (event) => {
 
 // --- Keyboard Listeners ---
 document.addEventListener('keydown', (event) => {
-    // Ignore shortcuts if modifiers (except Shift for potential future use) are pressed
-    if (event.metaKey || event.ctrlKey || event.altKey) {
-        return;
-    }
 
-    // Don't trigger shortcuts if focus is on an input element
-    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return;
-    }
-
-    // --- Undo Logic ---
-    // Note: Undo (Cmd/Ctrl+Z) is handled *before* the modifier check above
-    // Let's move the Undo check logic back here, as it *requires* modifiers.
+    // --- Undo Logic (Check this FIRST, as it requires modifiers) ---
     const isUndo = (event.metaKey || event.ctrlKey) && event.key === 'z';
     if (isUndo) {
          event.preventDefault(); // Prevent browser's default undo behavior
-         if (isDragging) return; // Don't allow undo while dragging
+         if (isDragging) return; // Don't allow undo while dragging/shaping
  
          if (history.length > 0) {
              gridState = history.pop(); // Restore the previous state
              drawGrid(); // Redraw the entire grid with the restored state
+             clearPreviewCanvas(); // Clear any stale previews (like selection)
              console.log(`Undo executed. History size: ${history.length}`);
          } else {
              console.log("Nothing to undo.");
@@ -632,16 +622,15 @@ document.addEventListener('keydown', (event) => {
     }
     // --- End Undo Logic ---
 
-     // --- Shift Key Tracking (for Shift+Click drawing, not shortcuts) ---
-    if (event.key === 'Shift') {
-        // This needs to be tracked regardless of other modifiers or focused element
-        // We'll handle this in a separate listener or refine its logic if needed.
-        // For now, let's assume the existing keyup/keydown for shiftKeyPressed is okay.
-        // Let's move the actual tracking logic outside the main shortcut flow.
-        // shiftKeyPressed = true; // This might interfere, handle in its own check
-        // return; // Don't return here, allow Shift+Number etc.
+    // Ignore shortcuts if other modifiers are pressed
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
     }
-    // --- End Shift Key Tracking ---
+
+    // Don't trigger shortcuts if focus is on an input element
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+        return;
+    }
 
     // --- Tool Selection Shortcuts (Lowercase only, no modifiers) ---
     if (!event.shiftKey) { // Check that Shift is NOT pressed
