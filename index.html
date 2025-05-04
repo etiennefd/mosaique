@@ -5,10 +5,105 @@
     <style>
         body { margin: 0; overflow: hidden; } /* Basic styling */
         canvas { display: block; /* Remove border */ }
+
+        #options-panel {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(240, 240, 240, 0.9);
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            font-family: sans-serif;
+            font-size: 12px;
+            display: flex;
+            flex-direction: column; /* Stack sections vertically */
+            gap: 10px; /* Spacing between sections */
+            z-index: 10; /* Ensure it's above the canvas */
+        }
+
+        .panel-section {
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+            margin-bottom: 5px;
+        }
+        .panel-section:last-child {
+             border-bottom: none;
+             margin-bottom: 0;
+             padding-bottom: 0;
+        }
+        .panel-section h4 {
+             margin-top: 0;
+             margin-bottom: 5px;
+             font-size: 13px;
+        }
+
+        .tool-options button,
+        .color-options .color-swatch {
+            border: 1px solid #aaa;
+            background-color: #fff;
+            padding: 5px;
+            margin: 2px;
+            border-radius: 3px;
+            cursor: pointer;
+            min-width: 25px; /* Ensure buttons have some width */
+            text-align: center;
+        }
+        .tool-options button:hover {
+            background-color: #eee;
+        }
+        .tool-options button.selected {
+            background-color: #cce;
+            border-color: #88a;
+            font-weight: bold;
+        }
+
+        .color-options {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+        }
+
+        .color-options .color-swatch {
+            width: 20px;
+            height: 20px;
+            padding: 0; /* Remove padding for swatches */
+        }
+        .color-options .color-swatch.selected {
+            border: 2px solid black;
+            box-shadow: 0 0 3px rgba(0,0,0,0.5);
+        }
+
     </style>
 </head>
 <body>
     <canvas id="mosaicCanvas"></canvas>
+
+    <div id="options-panel">
+        <div class="panel-section tool-options">
+            <h4>Tools</h4>
+            <button id="tool-pencil" title="Pencil">✏️</button>
+            <button id="tool-bucket" title="Paint Bucket"> B </button>
+            <button id="tool-line" title="Line"> L </button>
+            <button id="tool-rectangle" title="Rectangle"> R </button>
+            <button id="tool-circle" title="Circle"> C </button>
+            <button id="tool-select" title="Selection"> S </button>
+        </div>
+        <div class="panel-section color-options">
+             <h4>Colors</h4>
+             <div class="color-swatch" id="color-0" style="background-color: #FF0000;" title="Red"></div>
+             <div class="color-swatch" id="color-1" style="background-color: #00FF00;" title="Green"></div>
+             <div class="color-swatch" id="color-2" style="background-color: #0000FF;" title="Blue"></div>
+             <div class="color-swatch" id="color-3" style="background-color: #FFFF00;" title="Yellow"></div>
+             <div class="color-swatch" id="color-4" style="background-color: #FF00FF;" title="Magenta"></div>
+             <div class="color-swatch" id="color-5" style="background-color: #00FFFF;" title="Cyan"></div>
+             <div class="color-swatch" id="color-6" style="background-color: #FFFFFF;" title="White"></div>
+             <div class="color-swatch" id="color-7" style="background-color: #808080;" title="Gray"></div>
+             <div class="color-swatch" id="color-8" style="background-color: #000000;" title="Black"></div>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html> 
