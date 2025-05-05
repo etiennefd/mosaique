@@ -95,6 +95,15 @@
             box-shadow: 0 0 3px rgba(0,0,0,0.5);
         }
 
+        /* Style for the non-selectable spacing swatch */
+        .color-options .special-swatch {
+            font-size: 9px; /* Make text smaller */
+            line-height: 20px; /* Vertically center text */
+            text-align: center;
+            color: #555;
+            border-style: dashed; /* Different border */
+        }
+
         /* Optional: Style the picker popup if needed */
         .picker_wrapper {
              z-index: 20; /* Ensure picker is above options panel */
@@ -127,6 +136,7 @@
                  <div class="color-swatch" id="color-6" style="background-color: #EEE8AA;" title="Pale Goldenrod"></div>
                  <div class="color-swatch" id="color-7" style="background-color: #FFFFFF;" title="White"></div>
                  <div class="color-swatch" id="color-8" style="background-color: #E0E0E0;" title="Pale Gray"></div>
+                 <div class="color-swatch special-swatch" id="color-9" style="background-color: #FFFFFF;" title="Spacing Color">BG</div>
              </div>
         </div>
     </div>
