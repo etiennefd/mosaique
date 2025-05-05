@@ -821,9 +821,25 @@ document.addEventListener('keydown', (event) => {
          if (isDragging) return; // Don't allow undo while dragging/shaping
  
          if (history.length > 0) {
-             gridState = history.pop(); // Restore the previous state
-             drawGrid(); // Redraw the entire grid with the restored state
-             clearPreviewCanvas(); // Clear any stale previews (like selection)
+             const previousState = history.pop(); 
+
+             // Check if saved state includes palette
+             if (previousState.grid && previousState.pal) {
+                 gridState = previousState.grid;
+                 palette = previousState.pal;
+                 // Update swatches after palette restore
+                 palette.forEach((color, index) => {
+                     const swatch = document.getElementById(`color-${index}`);
+                     if (swatch) swatch.style.backgroundColor = color;
+                 });
+                 console.log("Restored grid and palette state.");
+             } else { // Assume older state only had grid
+                 gridState = previousState; // Restore just the grid state
+                 console.log("Restored grid state (no palette info).");
+             }
+
+             drawGrid(); 
+             clearPreviewCanvas(); 
              console.log(`Undo executed. History size: ${history.length}`);
          } else {
              console.log("Nothing to undo.");
@@ -996,9 +1012,13 @@ document.addEventListener('keyup', (event) => {
 let updateSelectedSwatch = () => {}; // Placeholder
 let updateSelectedTool = () => {};   // Placeholder
 
+let activeColorPickerIndex = -1; // Track which swatch is being edited
+let currentPickerInstance = null; // Hold the current picker instance
+
 function setupOptionsPanel() {
     const toolButtons = document.querySelectorAll('.tool-options button');
     const colorSwatches = document.querySelectorAll('.color-options .color-swatch');
+    // const hiddenColorPicker = document.getElementById('hidden-color-picker'); // REMOVED
 
     // Assign the actual function here
     updateSelectedSwatch = (newIndex) => {
@@ -1035,13 +1055,86 @@ function setupOptionsPanel() {
     });
 
     colorSwatches.forEach((swatch, index) => {
-        // Set initial background color from palette (redundant if already in HTML style, but safer)
         swatch.style.backgroundColor = palette[index];
 
+        // Single click selects color
         swatch.addEventListener('click', () => {
             selectedColorIndex = index;
             updateSelectedSwatch(index);
-             console.log(`Color selected via click: index ${index}`);
+            console.log(`Color selected via click: index ${index}`);
+        });
+
+        // Double click opens color picker
+        swatch.addEventListener('dblclick', (event) => {
+            // Close any existing picker first
+            if (currentPickerInstance) {
+                currentPickerInstance.destroy();
+            }
+
+            const indexToEdit = index; // Capture the index for this specific picker instance
+            activeColorPickerIndex = indexToEdit; // Keep global for potential external checks, but rely on indexToEdit inside callbacks
+            console.log(`Opening picker for index ${indexToEdit}, color ${palette[indexToEdit]}`);
+
+            currentPickerInstance = new Picker({
+                parent: swatch,
+                popup: 'top',
+                color: palette[indexToEdit],
+                alpha: false,
+                editor: true,
+                editorFormat: 'hex',
+                onDone: function(newColor) {
+                    console.log("Picker onDone callback started.");
+                    const hexColor = newColor.hex.substring(0, 7);
+                    console.log(`Picker done for captured index ${indexToEdit}, new color: ${hexColor}`); // Use indexToEdit
+
+                    // Use the captured index for checks and updates
+                    if (indexToEdit < 0 || indexToEdit >= palette.length) {
+                         console.log("onDone: Invalid captured index, returning.");
+                         return;
+                    }
+
+                    const oldColor = palette[indexToEdit];
+                    if (oldColor === hexColor) {
+                        console.log("onDone: Color unchanged, returning.");
+                        return; 
+                    }
+
+                    console.log("onDone: Proceeding with update...");
+
+                    // Save state *before* changing the palette
+                    if (history.length >= MAX_HISTORY) { history.shift(); }
+                    // Make sure to capture the *current* palette state before modification
+                    const paletteBeforeChange = [...palette];
+                    history.push({ grid: deepCopyGrid(gridState), pal: paletteBeforeChange });
+                    console.log(`State saved (Palette Change). History size: ${history.length}`);
+
+                    // Update palette & UI using captured index
+                    palette[indexToEdit] = hexColor;
+                    const editedSwatch = document.getElementById(`color-${indexToEdit}`); // Get swatch using captured index
+                    if (editedSwatch) { // Check if swatch still exists
+                        editedSwatch.style.backgroundColor = hexColor;
+                        editedSwatch.title = hexColor;
+                        console.log("onDone: Updated swatch UI.");
+                    } else {
+                        console.warn(`Could not find swatch element for index ${indexToEdit} during update.`);
+                    }
+
+                    // Redraw grid
+                    drawGrid();
+                    console.log("onDone: Called drawGrid().");
+
+                    // Reset index tracker only AFTER successful processing
+                    activeColorPickerIndex = -1; 
+                },
+                onClose: function() {
+                    // Clean up reference when picker is closed
+                    console.log("Picker closed.");
+                    currentPickerInstance = null;
+                    // activeColorPickerIndex = -1; // REMOVE THIS - it causes the race condition
+                }
+            });
+
+            currentPickerInstance.show();
         });
     });
 

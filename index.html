@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Mosaique</title>
+    <title>Mosaïque</title>
+    <!-- Add vanilla-picker CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vanilla-picker@2/dist/vanilla-picker.csp.css">
     <style>
         body { margin: 0; overflow: hidden; } /* Basic styling */
         canvas {
@@ -93,6 +95,10 @@
             box-shadow: 0 0 3px rgba(0,0,0,0.5);
         }
 
+        /* Optional: Style the picker popup if needed */
+        .picker_wrapper {
+             z-index: 20; /* Ensure picker is above options panel */
+        }
     </style>
 </head>
 <body>
@@ -125,6 +131,11 @@
         </div>
     </div>
 
+    <!-- Remove or comment out the hidden input -->
+    <!-- <input type="color" id="hidden-color-picker" style="position: absolute; left: -9999px; visibility: hidden;"> -->
+
+    <!-- Add vanilla-picker JS -->
+    <script src="https://cdn.jsdelivr.net/npm/vanilla-picker@2/dist/vanilla-picker.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html> 
