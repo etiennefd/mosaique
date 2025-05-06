@@ -427,7 +427,6 @@ function eraseAreaOnPreview(rect) {
 }
 
 function drawPreviewSelection(r1, c1, r2, c2) {
-    // clearPreviewCanvas(); // REMOVED: Clearing is handled by caller
 
     const minR = Math.min(r1, r2);
     const maxR = Math.max(r1, r2);
@@ -469,7 +468,6 @@ function drawBufferOnPreview(targetTopRow, targetLeftCol) {
 }
 
 function drawPreviewShape(r1, c1, r2, c2, tool) {
-    // clearPreviewCanvas(); // REMOVED: Clearing is handled by caller
     previewCtx.fillStyle = palette[selectedColorIndex];
 
     let pixels = [];
@@ -526,7 +524,7 @@ canvas.addEventListener('mousedown', (event) => {
             isDragging = true;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
-            currentDragMode = (gridState[row][col] === selectedColorIndex) ? 'erase' : 'draw';
+            currentDragMode = 'draw'; // Pencil always draws
             if (handlePixelChange(row, col, currentDragMode)) {
                  changeOccurred = true;
             }
@@ -1036,7 +1034,6 @@ let currentPickerInstance = null; // Hold the current picker instance
 function setupOptionsPanel() {
     const toolButtons = document.querySelectorAll('.tool-options button');
     const colorSwatches = document.querySelectorAll('.color-options .color-swatch');
-    // const hiddenColorPicker = document.getElementById('hidden-color-picker'); // REMOVED
 
     // Assign the actual function here
     updateSelectedSwatch = (newIndex) => {
