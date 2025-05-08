@@ -52,11 +52,11 @@ let logicalCanvasWidth = 0; // Full width of the grid drawing area
 let logicalCanvasHeight = 0; // Full height of the grid drawing area
 // --- End Viewport/Panning State ---
 
-// --- Panning State (Restored for Space+Drag) ---
-let isPanModeActive = false; // True if spacebar is held
-let isPanning = false;       // True if actively dragging to pan
-let panStart = { x: 0, y: 0 };     // Mouse position at pan start
-let scrollStart = { x: 0, y: 0 };  // canvasContainer.scrollLeft/Top at pan start
+// --- Panning State (Removing Space+Drag) ---
+// let isPanModeActive = false; 
+// let isPanning = false;       
+// let panStart = { x: 0, y: 0 };     
+// let scrollStart = { x: 0, y: 0 };  
 // --- End Panning State ---
 
 let canvasContainer = null; // Will be initialized in setup
@@ -546,6 +546,8 @@ function drawPreviewShape(r1, c1, r2, c2, tool) {
 let changeOccurred = false;
 
 canvas.addEventListener('mousedown', (event) => {
+    // --- Panning logic (REMOVING) ---
+    /*
     if (isPanModeActive && canvasContainer) {
         isPanning = true;
         panStart.x = event.clientX;
@@ -553,12 +555,13 @@ canvas.addEventListener('mousedown', (event) => {
         scrollStart.x = canvasContainer.scrollLeft;
         scrollStart.y = canvasContainer.scrollTop;
         canvas.style.cursor = 'grabbing';
-        event.preventDefault(); // Prevent text selection, etc.
-        return; // Panning takes precedence
+        event.preventDefault(); 
+        return; 
     }
+    */
+    // --- End Panning logic ---
 
-    const coords = getPixelCoords(event); // Get logical coords now
-
+    const coords = getPixelCoords(event); 
     changeOccurred = false;
     lastPixelCoords = null;
     if (!coords && !isDrawingShape && !isDefiningSelection && !isMovingSelection) {
@@ -663,17 +666,18 @@ canvas.addEventListener('mousedown', (event) => {
 });
 
 canvas.addEventListener('mousemove', (event) => {
+    // --- Panning logic (REMOVING) ---
+    /*
     if (isPanning && canvasContainer) {
         const dx = event.clientX - panStart.x;
         const dy = event.clientY - panStart.y;
-
         canvasContainer.scrollLeft = scrollStart.x - dx;
         canvasContainer.scrollTop = scrollStart.y - dy;
-        
-        // The 'scroll' event on canvasContainer will trigger drawGrid and preview updates.
         event.preventDefault();
         return;
     }
+    */
+    // --- End Panning logic ---
 
     if (isDragging) {
         const coords = getPixelCoords(event);
@@ -729,13 +733,16 @@ canvas.addEventListener('mousemove', (event) => {
 });
 
 canvas.addEventListener('mouseup', (event) => {
+    // --- Panning logic (REMOVING) ---
+    /*
     if (isPanning) {
         isPanning = false;
-        // If space is still held, cursor remains 'grab', otherwise set to tool cursor
         canvas.style.cursor = isPanModeActive ? 'grab' : determineCursorForCurrentTool();
         event.preventDefault();
         return;
     }
+    */
+    // --- End Panning logic ---
 
     if (isDragging) {
         let finalizeAction = false;
@@ -864,12 +871,14 @@ canvas.addEventListener('mouseup', (event) => {
 });
 
 canvas.addEventListener('mouseleave', (event) => {
+    // --- Panning logic (REMOVING) ---
+    /*
     if (isPanning) {
         isPanning = false;
-        // If space is still held, cursor remains 'grab', otherwise set to tool cursor
         canvas.style.cursor = isPanModeActive ? 'grab' : determineCursorForCurrentTool();
-        // No specific action needed beyond stopping the pan, as the state is now managed by scroll offsets.
     }
+    */
+    // --- End Panning logic ---
 
     clearPreviewCanvas();
     if (isDragging) { // This is for tool drags, not panning drag
@@ -1113,7 +1122,8 @@ document.addEventListener('keydown', (event) => {
     }
     // --- End Color Selection Shortcuts ---
 
-    // --- Pan Mode Activation (Spacebar) --- (Restored)
+    // --- Pan Mode Activation (Spacebar) --- (REMOVING)
+    /*
     if (event.key === ' ' && !isPanModeActive) {
         if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || currentPickerInstance) {
             return; 
@@ -1123,9 +1133,10 @@ document.addEventListener('keydown', (event) => {
         canvas.style.cursor = 'grab';
         return; 
     }
+    */
     // --- End Pan Mode Activation ---
 
-    // --- Shift Key State --- (Moved into main keydown listener)
+    // --- Shift Key State ---
     if (event.key === 'Shift') {
         shiftKeyPressed = true;
     }
@@ -1139,7 +1150,8 @@ document.addEventListener('keyup', (event) => {
     }
     // --- End Shift Key State ---
 
-    // --- Pan Mode Deactivation (Spacebar) --- (Restored)
+    // --- Pan Mode Deactivation (Spacebar) --- (REMOVING)
+    /*
     if (event.key === ' ') {
         if (isPanModeActive) {
             event.preventDefault();
@@ -1152,21 +1164,18 @@ document.addEventListener('keyup', (event) => {
             }
         }
     }
+    */
     // --- End Pan Mode Deactivation ---
 });
 
-// --- Window Blur Event --- (Consolidated)
+// --- Window Blur Event ---
 window.addEventListener('blur', () => {
-    if (isPanModeActive) {
-        isPanModeActive = false;
-        isPanning = false; 
-        canvas.style.cursor = determineCursorForCurrentTool();
-    }
-    // Also reset shift key if window loses focus
+    // Pan-related logic was here, will be cleaned if isPanModeActive is gone
+    // if (isPanModeActive) { ... }
     shiftKeyPressed = false;
 });
 
-// Function to determine appropriate cursor (Restored)
+// Function to determine appropriate cursor (KEEPING)
 function determineCursorForCurrentTool() {
     if (currentTool === 'pencil' || currentTool === 'line' || currentTool === 'rectangle' || currentTool === 'circle') {
         return 'crosshair';
@@ -1219,6 +1228,9 @@ function setupOptionsPanel() {
         }
         currentTool = newToolId.replace('tool-', ''); // Extract tool name
         console.log(`Tool selected: ${currentTool}`);
+
+        // Update canvas cursor based on the new tool (removed isPanModeActive check)
+        canvas.style.cursor = determineCursorForCurrentTool();
     };
 
     toolButtons.forEach(button => {
