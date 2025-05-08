@@ -1353,7 +1353,7 @@ function setupOptionsPanel() {
     }
     if (canvasContainer) {
         canvasContainer.addEventListener('scroll', () => {
-            drawGrid(); // Redraw the main grid based on new scroll position (will include culling)
+            drawGrid(); 
             clearPreviewCanvas();
             
             // Redraw active previews based on current state
@@ -1374,10 +1374,30 @@ function setupOptionsPanel() {
                 const c2 = newTopLeftCol + selectionBuffer.width - 1;
                 drawPreviewSelection(newTopLeftRow, newTopLeftCol, r2, c2);
             } else if (selectionRect && !isDefiningSelection && !isMovingSelection) {
-                 // If there's a static finalized selectionRect, keep it drawn
                  drawPreviewSelection(selectionRect.r1, selectionRect.c1, selectionRect.r2, selectionRect.c2);
             }
         });
+
+        // Add wheel event listener for smooth omnidirectional scrolling
+        canvasContainer.addEventListener('wheel', (event) => {
+            // Don't interfere if a color picker or other modal is active and might use wheel scroll
+            if (currentPickerInstance) {
+                return;
+            }
+
+            // Prevent default browser scroll handling for the container
+            event.preventDefault();
+
+            // Update scroll position directly
+            // Adjust sensitivity if needed by multiplying deltaX/Y by a factor
+            const scrollFactor = 1; // Adjust if scrolling feels too fast or too slow
+            canvasContainer.scrollLeft += event.deltaX * scrollFactor;
+            canvasContainer.scrollTop += event.deltaY * scrollFactor;
+
+            // Our existing 'scroll' event listener on canvasContainer will handle redraws
+            // No need to call drawGrid() here directly, as changing scrollLeft/Top fires the 'scroll' event.
+        }, { passive: false }); // passive: false is needed to allow preventDefault
+
     } else {
         console.error("#canvas-container not found, scroll listener not added.");
     }
