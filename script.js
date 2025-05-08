@@ -4,10 +4,10 @@ const previewCanvas = document.getElementById('previewCanvas');
 const previewCtx = previewCanvas.getContext('2d');
 
 // --- Grid Configuration ---
-const gridRows = 200;
-const gridCols = 400;
-const pixelSize = 5;
-const spacing = 1;
+let gridRows = 200;
+let gridCols = 400;
+let pixelSize = 5;
+let spacing = 1;
 // const defaultColor = '#E0E0E0'; // Replaced by palette
 // const activeColor = '#0000FF';   // Replaced by palette
 const backgroundColor = '#FFFFFF'; // Canvas background, used for clearing
@@ -57,16 +57,16 @@ function deepCopyGrid(grid) {
 // --- End Utilities ---
 
 // Calculate canvas size based on grid
-const canvasWidth = spacing + gridCols * (pixelSize + spacing);
-const canvasHeight = spacing + gridRows * (pixelSize + spacing);
+let canvasWidth;
+let canvasHeight;
 
 // Size both canvases
-canvas.width = canvasWidth;
-canvas.height = canvasHeight;
-previewCanvas.width = canvasWidth;
-previewCanvas.height = canvasHeight;
+// canvas.width = canvasWidth; // Initial sizing will be done by reinitializeCanvasAndGrid
+// canvas.height = canvasHeight;
+// previewCanvas.width = canvasWidth;
+// previewCanvas.height = canvasHeight;
 
-console.log(`Main and Preview canvas size set to ${canvasWidth}x${canvasHeight}`);
+// console.log(`Main and Preview canvas size set to ${canvasWidth}x${canvasHeight}`); // Will be logged in reinitialize
 
 // --- Initialization ---
 function initializeGridState() {
@@ -1034,6 +1034,7 @@ let currentPickerInstance = null; // Hold the current picker instance
 function setupOptionsPanel() {
     const toolButtons = document.querySelectorAll('.tool-options button');
     const colorSwatches = document.querySelectorAll('.color-options .color-swatch');
+    const applyGridChangesButton = document.getElementById('applyGridChangesButton'); // New
 
     // Assign the actual function here
     updateSelectedSwatch = (newIndex) => {
@@ -1171,12 +1172,108 @@ function setupOptionsPanel() {
     updateSelectedSwatch(selectedColorIndex);
     updateSelectedTool(`tool-${currentTool}`); // Set initial tool UI
 
+    // Add event listener for the new button (New)
+    if (applyGridChangesButton) {
+        applyGridChangesButton.addEventListener('click', updateGridConfiguration);
+    } else {
+        console.warn("applyGridChangesButton not found. Grid configuration cannot be updated via UI.");
+    }
+
+    // Populate initial values for grid config inputs (New)
+    const pixelSizeInput = document.getElementById('pixelSizeInput');
+    const spacingInput = document.getElementById('spacingInput');
+    const gridRowsInput = document.getElementById('gridRowsInput');
+    const gridColsInput = document.getElementById('gridColsInput');
+
+    if (pixelSizeInput) pixelSizeInput.value = pixelSize;
+    if (spacingInput) spacingInput.value = spacing;
+    if (gridRowsInput) gridRowsInput.value = gridRows;
+    if (gridColsInput) gridColsInput.value = gridCols;
+
 }
 // --- End UI Interaction ---
 
 // --- Initial Setup ---
-initializeGridState();
-drawGrid(); // Draw the initial grid
+// initializeGridState(); // Now done by reinitializeCanvasAndGrid
+// drawGrid(); // Now done by reinitializeCanvasAndGrid
 setupOptionsPanel(); // Initialize the options panel listeners and UI
-console.log(`Drew initial ${gridRows}x${gridCols} grid.`);
-// --- End Initial Setup --- 
+reinitializeCanvasAndGrid(); // NEW: Perform initial canvas and grid setup
+// console.log(`Drew initial ${gridRows}x${gridCols} grid.`); // Logged by reinitializeCanvasAndGrid
+// --- End Initial Setup ---
+
+// --- Grid Configuration Update ---
+function reinitializeCanvasAndGrid() {
+    // Recalculate canvas size
+    canvasWidth = spacing + gridCols * (pixelSize + spacing);
+    canvasHeight = spacing + gridRows * (pixelSize + spacing);
+
+    // Size both canvases
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    previewCanvas.width = canvasWidth;
+    previewCanvas.height = canvasHeight;
+
+    console.log(`Canvas re-initialized. Size: ${canvasWidth}x${canvasHeight}, Grid: ${gridRows}x${gridCols}, Pixel: ${pixelSize}, Spacing: ${spacing}`);
+
+    initializeGridState(); // Re-create gridState with new dimensions
+    drawGrid(); // Draw the new empty grid
+
+    // Clear history and selection as they are no longer valid
+    history = [];
+    selectionRect = null;
+    selectionBuffer = null;
+    lastClickCoords = null; // Reset last click for line tool etc.
+    clearPreviewCanvas();
+
+    console.log("Grid configuration applied. History and selection cleared.");
+}
+
+function updateGridConfiguration() {
+    // Assume HTML input elements with these IDs exist
+    const newPixelSize = parseInt(document.getElementById('pixelSizeInput').value, 10);
+    const newSpacingSize = parseInt(document.getElementById('spacingInput').value, 10);
+    const newGridRows = parseInt(document.getElementById('gridRowsInput').value, 10);
+    const newGridCols = parseInt(document.getElementById('gridColsInput').value, 10);
+
+    // --- Validation --- 
+    // Add your desired min/max checks here. Example:
+    if (isNaN(newPixelSize) || newPixelSize < 1 || newPixelSize > 10) {
+        alert("Pixel Size must be between 1 and 10.");
+        return;
+    }
+    if (isNaN(newSpacingSize) || newSpacingSize < 0 || newSpacingSize > 3) {
+        alert("Spacing Size must be between 0 and 3.");
+        return;
+    }
+    if (isNaN(newGridRows) || newGridRows < 10 || newGridRows > 500) { // Example limits
+        alert("Grid Rows must be between 10 and 500.");
+        return;
+    }
+    if (isNaN(newGridCols) || newGridCols < 10 || newGridCols > 800) { // Example limits
+        alert("Grid Columns must be between 10 and 800.");
+        return;
+    }
+    // --- End Validation ---
+
+    // Check if any configuration actually changed to avoid unnecessary re-initialization
+    if (newPixelSize === pixelSize && 
+        newSpacingSize === spacing && 
+        newGridRows === gridRows && 
+        newGridCols === gridCols) {
+        console.log("No grid configuration changes detected.");
+        return;
+    }
+
+    console.log("Updating grid configuration...");
+
+    // Save current state before changing (optional, but good for undo of config change if desired later)
+    // For now, we clear history, so a full config undo is not implemented here.
+
+    // Update global variables
+    pixelSize = newPixelSize;
+    spacing = newSpacingSize;
+    gridRows = newGridRows;
+    gridCols = newGridCols;
+
+    reinitializeCanvasAndGrid();
+} 

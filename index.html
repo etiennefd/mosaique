@@ -139,6 +139,26 @@
                  <div class="color-swatch special-swatch" id="color-9" style="background-color: #FFFFFF;" title="Spacing Color">BG</div>
              </div>
         </div>
+        <div class="panel-section grid-config-options">
+            <h4>Grid Configuration</h4>
+            <div>
+                <label for="pixelSizeInput">Pixel Size (1-10):</label>
+                <input type="number" id="pixelSizeInput" min="1" max="10" value="5">
+            </div>
+            <div>
+                <label for="spacingInput">Spacing (0-3):</label>
+                <input type="number" id="spacingInput" min="0" max="3" value="1">
+            </div>
+            <div>
+                <label for="gridRowsInput">Grid Rows (10-500):</label>
+                <input type="number" id="gridRowsInput" min="10" max="500" value="200">
+            </div>
+            <div>
+                <label for="gridColsInput">Grid Columns (10-800):</label>
+                <input type="number" id="gridColsInput" min="10" max="800" value="400">
+            </div>
+            <button id="applyGridChangesButton">Apply Grid Changes</button>
+        </div>
     </div>
 
     <!-- Remove or comment out the hidden input -->
