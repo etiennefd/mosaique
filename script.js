@@ -47,7 +47,19 @@ let selectionBuffer = null;    // Stores the pixel data { width, height, data: [
 let moveStartCoords = null;    // Store {row, col} where move drag started
 let moveOffset = null;         // Store {dr, dc} offset from top-left corner to mouse click
 
-// --- End Palette & State ---
+// --- Viewport/Panning State ---
+let logicalCanvasWidth = 0; // Full width of the grid drawing area
+let logicalCanvasHeight = 0; // Full height of the grid drawing area
+// --- End Viewport/Panning State ---
+
+// --- Panning State (Restored for Space+Drag) ---
+let isPanModeActive = false; // True if spacebar is held
+let isPanning = false;       // True if actively dragging to pan
+let panStart = { x: 0, y: 0 };     // Mouse position at pan start
+let scrollStart = { x: 0, y: 0 };  // canvasContainer.scrollLeft/Top at pan start
+// --- End Panning State ---
+
+let canvasContainer = null; // Will be initialized in setup
 
 // --- Utilities ---
 function deepCopyGrid(grid) {
@@ -56,12 +68,12 @@ function deepCopyGrid(grid) {
 }
 // --- End Utilities ---
 
-// Calculate canvas size based on grid
-let canvasWidth;
-let canvasHeight;
+// Calculate canvas size based on grid - These are now logical and handled internally
+// let canvasWidth; // DELETE THIS LINE
+// let canvasHeight; // DELETE THIS LINE
 
-// Size both canvases
-// canvas.width = canvasWidth; // Initial sizing will be done by reinitializeCanvasAndGrid
+// Size both canvases - This is now done in reinitializeCanvasAndGrid
+// canvas.width = canvasWidth;
 // canvas.height = canvasHeight;
 // previewCanvas.width = canvasWidth;
 // previewCanvas.height = canvasHeight;
@@ -83,51 +95,72 @@ function initializeGridState() {
 
 // --- Drawing ---
 function drawGrid() {
-    // Set background color (clears canvas)
-    ctx.fillStyle = spacingColor; // Use spacingColor variable
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!canvasContainer) return; // Should be initialized
 
-    // Draw pixels based on state
-    for (let r = 0; r < gridRows; r++) {
-        for (let c = 0; c < gridCols; c++) {
+    // Determine the visible portion of the logical canvas
+    const viewScrollX = canvasContainer.scrollLeft;
+    const viewScrollY = canvasContainer.scrollTop;
+    const viewWidth = canvasContainer.clientWidth;
+    const viewHeight = canvasContainer.clientHeight;
+
+    // Fill the background of the entire logical canvas with spacingColor
+    // This is still needed for the full canvas, browser clips it.
+    ctx.fillStyle = spacingColor;
+    ctx.fillRect(0, 0, logicalCanvasWidth, logicalCanvasHeight);
+
+    // Calculate the range of rows and columns to draw
+    const firstCol = Math.max(0, Math.floor((viewScrollX - spacing) / (pixelSize + spacing)) - 1); // -1 for buffer
+    const lastCol = Math.min(gridCols - 1, Math.ceil((viewScrollX + viewWidth - spacing) / (pixelSize + spacing)) + 1); // +1 for buffer
+    const firstRow = Math.max(0, Math.floor((viewScrollY - spacing) / (pixelSize + spacing)) - 1); // -1 for buffer
+    const lastRow = Math.min(gridRows - 1, Math.ceil((viewScrollY + viewHeight - spacing) / (pixelSize + spacing)) + 1); // +1 for buffer
+
+    for (let r = firstRow; r <= lastRow; r++) {
+        for (let c = firstCol; c <= lastCol; c++) {
+            const logicalX = spacing + c * (pixelSize + spacing);
+            const logicalY = spacing + r * (pixelSize + spacing);
+
+            // Optional: Additional check if pixel is strictly within visible rect (already covered by loop bounds usually)
+            // if (logicalX + pixelSize < viewScrollX || logicalX > viewScrollX + viewWidth ||
+            //     logicalY + pixelSize < viewScrollY || logicalY > viewScrollY + viewHeight) {
+            //     continue;
+            // }
+
             const colorIndex = gridState[r][c];
-            // Use index 0-8 for pixels
-            if (colorIndex >= 0 && colorIndex < 9) { 
+            if (colorIndex >= 0 && colorIndex < 9) {
                 ctx.fillStyle = palette[colorIndex] || palette[defaultPixelColorIndex];
             } else {
-                ctx.fillStyle = palette[defaultPixelColorIndex]; // Fallback
+                ctx.fillStyle = palette[defaultPixelColorIndex];
             }
-            const x = spacing + c * (pixelSize + spacing);
-            const y = spacing + r * (pixelSize + spacing);
-            ctx.fillRect(x, y, pixelSize, pixelSize);
+            ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
         }
     }
-    // console.log("Grid redrawn."); // Optional: for debugging
+    // console.log(`Drew grid for visible rows: ${firstRow}-${lastRow}, cols: ${firstCol}-${lastCol}`);
 }
 
 function clearPreviewCanvas() {
-    previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    previewCtx.clearRect(0, 0, logicalCanvasWidth, logicalCanvasHeight); // Clear entire logical preview canvas
 }
 // --- End Drawing ---
 
 // --- Interaction ---
 function getPixelCoords(event) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const rect = canvas.getBoundingClientRect(); // rect of the large, scrollable canvas
 
-    const canvasX = (event.clientX - rect.left) * scaleX;
-    const canvasY = (event.clientY - rect.top) * scaleY;
+    // canvasX/Y are click coordinates relative to the top-left corner of the *entire logical canvas*
+    // This is because rect.left/top are the coordinates of the visible part of the canvas relative to the viewport,
+    // and event.clientX/Y are click coordinates relative to the viewport.
+    // The difference gives the click position from the top-left of the (potentially scrolled) canvas element.
+    const canvasX = event.clientX - rect.left;
+    const canvasY = event.clientY - rect.top;
 
-    // Calculate row and column, considering spacing
+    // Calculate row and column based on these logical canvas coordinates
     const col = Math.floor((canvasX - spacing) / (pixelSize + spacing));
     const row = Math.floor((canvasY - spacing) / (pixelSize + spacing));
 
-    // Check bounds
     if (row >= 0 && row < gridRows && col >= 0 && col < gridCols) {
         return { row, col };
     }
-    return null; // Click was outside the grid pixels
+    return null; 
 }
 
 function handlePixelChange(row, col, mode) {
@@ -137,19 +170,20 @@ function handlePixelChange(row, col, mode) {
     if (mode === 'draw') {
         newPixelIndex = selectedColorIndex;
     } else { // mode === 'erase'
-        newPixelIndex = erasePixelColorIndex; // Erase to the designated erase color (e.g., white)
+        newPixelIndex = erasePixelColorIndex;
     }
 
     if (currentPixelIndex !== newPixelIndex) {
         gridState[row][col] = newPixelIndex;
-        // Only redraw the single changed pixel for efficiency during drag
         ctx.fillStyle = palette[newPixelIndex];
-        const x = spacing + col * (pixelSize + spacing);
-        const y = spacing + row * (pixelSize + spacing);
-        ctx.fillRect(x, y, pixelSize, pixelSize);
-        return true; // Indicate that a change was made
+        const logicalX = spacing + col * (pixelSize + spacing);
+        const logicalY = spacing + row * (pixelSize + spacing);
+
+        // REMOVED visibility check based on screenX/Y. Draw directly.
+        ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+        return true; 
     }
-    return false; // No change made
+    return false; 
 }
 
 // --- Line Drawing Utility ---
@@ -412,78 +446,98 @@ function pasteBufferToGrid(targetTopRow, targetLeftCol) {
 
 // --- Preview Drawing ---
 function eraseAreaOnPreview(rect) {
-    if (!rect) return;
+    if (!rect || !canvasContainer) return;
     const { r1, c1, r2, c2 } = rect;
+
+    const viewScrollX = canvasContainer.scrollLeft;
+    const viewScrollY = canvasContainer.scrollTop;
+    const viewWidth = canvasContainer.clientWidth;
+    const viewHeight = canvasContainer.clientHeight;
+
     previewCtx.fillStyle = palette[erasePixelColorIndex];
     for (let r = r1; r <= r2; r++) {
         for (let c = c1; c <= c2; c++) {
             if (r >= 0 && r < gridRows && c >= 0 && c < gridCols) {
-                const x = spacing + c * (pixelSize + spacing);
-                const y = spacing + r * (pixelSize + spacing);
-                previewCtx.fillRect(x, y, pixelSize, pixelSize);
+                const logicalX = spacing + c * (pixelSize + spacing);
+                const logicalY = spacing + r * (pixelSize + spacing);
+
+                if (logicalX + pixelSize > viewScrollX && logicalX < viewScrollX + viewWidth &&
+                    logicalY + pixelSize > viewScrollY && logicalY < viewScrollY + viewHeight) {
+                    previewCtx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+                }
             }
         }
     }
 }
 
 function drawPreviewSelection(r1, c1, r2, c2) {
-
     const minR = Math.min(r1, r2);
     const maxR = Math.max(r1, r2);
     const minC = Math.min(c1, c2);
     const maxC = Math.max(c1, c2);
 
-    // Calculate pixel coordinates for the rectangle corners
-    const startX = spacing + minC * (pixelSize + spacing);
-    const startY = spacing + minR * (pixelSize + spacing);
-    const width = (maxC - minC + 1) * (pixelSize + spacing);
-    const height = (maxR - minR + 1) * (pixelSize + spacing);
+    const logicalStartX = spacing + minC * (pixelSize + spacing);
+    const logicalStartY = spacing + minR * (pixelSize + spacing);
+    const logicalWidth = (maxC - minC + 1) * (pixelSize + spacing); 
+    const logicalHeight = (maxR - minR + 1) * (pixelSize + spacing);
 
-    // Draw a dashed rectangle (marching ants effect is more complex)
     previewCtx.strokeStyle = 'black';
     previewCtx.lineWidth = 1;
-    previewCtx.setLineDash([4, 2]); // Dashed line pattern
-    previewCtx.strokeRect(startX - spacing/2, startY - spacing/2, width, height);
-    previewCtx.setLineDash([]); // Reset line dash
+    previewCtx.setLineDash([4, 2]);
+    previewCtx.strokeRect(logicalStartX - spacing/2, logicalStartY - spacing/2, logicalWidth, logicalHeight);
+    previewCtx.setLineDash([]);
 }
 
 function drawBufferOnPreview(targetTopRow, targetLeftCol) {
-    if (!selectionBuffer) return;
+    if (!selectionBuffer || !canvasContainer) return;
     const { width, height, data } = selectionBuffer;
+
+    const viewScrollX = canvasContainer.scrollLeft;
+    const viewScrollY = canvasContainer.scrollTop;
+    const viewWidth = canvasContainer.clientWidth;
+    const viewHeight = canvasContainer.clientHeight;
 
     for (let r = 0; r < height; r++) {
         for (let c = 0; c < width; c++) {
             const pixelIndex = data[r][c];
             const color = palette[pixelIndex];
-            const x = spacing + (targetLeftCol + c) * (pixelSize + spacing);
-            const y = spacing + (targetTopRow + r) * (pixelSize + spacing);
+            const logicalX = spacing + (targetLeftCol + c) * (pixelSize + spacing);
+            const logicalY = spacing + (targetTopRow + r) * (pixelSize + spacing);
 
-            // Basic check to avoid drawing outside canvas bounds if buffer is moved partially off
-             if (targetTopRow + r >= 0 && targetTopRow + r < gridRows && targetLeftCol + c >= 0 && targetLeftCol + c < gridCols) {
-                 previewCtx.fillStyle = color;
-                 previewCtx.fillRect(x, y, pixelSize, pixelSize);
-             }
+            if (targetTopRow + r >= 0 && targetTopRow + r < gridRows && 
+                targetLeftCol + c >= 0 && targetLeftCol + c < gridCols) {
+                
+                if (logicalX + pixelSize > viewScrollX && logicalX < viewScrollX + viewWidth &&
+                    logicalY + pixelSize > viewScrollY && logicalY < viewScrollY + viewHeight) {
+                    previewCtx.fillStyle = color;
+                    previewCtx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+                }
+            }
         }
     }
 }
 
 function drawPreviewShape(r1, c1, r2, c2, tool) {
+    if (!canvasContainer) return;
     previewCtx.fillStyle = palette[selectedColorIndex];
+    let pixelsToPreview = [];
+    if (tool === 'line') pixelsToPreview = getLinePixels(r1, c1, r2, c2);
+    else if (tool === 'rectangle') pixelsToPreview = getRectanglePixels(r1, c1, r2, c2);
+    else if (tool === 'circle') pixelsToPreview = getCirclePixels(r1, c1, r2, c2);
 
-    let pixels = [];
-    if (tool === 'line') {
-        pixels = getLinePixels(r1, c1, r2, c2);
-    } else if (tool === 'rectangle') {
-        pixels = getRectanglePixels(r1, c1, r2, c2);
-    } else if (tool === 'circle') {
-        pixels = getCirclePixels(r1, c1, r2, c2);
-    }
+    const viewScrollX = canvasContainer.scrollLeft;
+    const viewScrollY = canvasContainer.scrollTop;
+    const viewWidth = canvasContainer.clientWidth;
+    const viewHeight = canvasContainer.clientHeight;
 
-    // Draw the pixels on the preview canvas
-    pixels.forEach(([r, c]) => {
-        const x = spacing + c * (pixelSize + spacing);
-        const y = spacing + r * (pixelSize + spacing);
-        previewCtx.fillRect(x, y, pixelSize, pixelSize);
+    pixelsToPreview.forEach(([r_coord, c_coord]) => {
+        const logicalX = spacing + c_coord * (pixelSize + spacing);
+        const logicalY = spacing + r_coord * (pixelSize + spacing);
+        
+        if (logicalX + pixelSize > viewScrollX && logicalX < viewScrollX + viewWidth &&
+            logicalY + pixelSize > viewScrollY && logicalY < viewScrollY + viewHeight) {
+            previewCtx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+        }
     });
 }
 // --- End Preview Drawing ---
@@ -492,14 +546,39 @@ function drawPreviewShape(r1, c1, r2, c2, tool) {
 let changeOccurred = false;
 
 canvas.addEventListener('mousedown', (event) => {
+    if (isPanModeActive && canvasContainer) {
+        isPanning = true;
+        panStart.x = event.clientX;
+        panStart.y = event.clientY;
+        scrollStart.x = canvasContainer.scrollLeft;
+        scrollStart.y = canvasContainer.scrollTop;
+        canvas.style.cursor = 'grabbing';
+        event.preventDefault(); // Prevent text selection, etc.
+        return; // Panning takes precedence
+    }
+
+    const coords = getPixelCoords(event); // Get logical coords now
+
     changeOccurred = false;
     lastPixelCoords = null;
-    const coords = getPixelCoords(event);
-    if (!coords) return;
+    if (!coords && !isDrawingShape && !isDefiningSelection && !isMovingSelection) {
+         // If click is outside grid and not starting a shape/selection from outside,
+         // it might be an unintentional click, do nothing beyond what pan handled.
+         // This also prevents errors if coords is null later when a tool expects it.
+        return;
+    }
 
-    const { row, col } = coords;
-    shapeStartX = col;
-    shapeStartY = row;
+    // Ensure shapeStartX/Y are set if coords are valid, even if tool isn't shape-based initially
+    // This helps if a tool switch happens or for lastClickCoords consistency.
+    if (coords) {
+        shapeStartX = coords.col; // Store as grid col/row
+        shapeStartY = coords.row; // Store as grid col/row
+    } else {
+        // For operations like selection start that might be outside, allow, but shapeStartX/Y might be null
+        shapeStartX = null;
+        shapeStartY = null;
+    }
+
     isDrawingShape = false;
     isDefiningSelection = false;
     isMovingSelection = false; // Reset move flag
@@ -514,30 +593,30 @@ canvas.addEventListener('mousedown', (event) => {
             isDragging = false;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
-            if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, row, col, 'draw')) {
+            if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, coords.row, coords.col, 'draw')) {
                 changeOccurred = true;
             }
             if (!changeOccurred && history.length > 0) { history.pop(); }
-            lastClickCoords = { row, col };
+            lastClickCoords = { row: coords.row, col: coords.col };
          } else {
             // Pencil Click/Drag Start
             isDragging = true;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
             currentDragMode = 'draw'; // Pencil always draws
-            if (handlePixelChange(row, col, currentDragMode)) {
+            if (handlePixelChange(coords.row, coords.col, currentDragMode)) {
                  changeOccurred = true;
             }
-            lastPixelCoords = { row, col };
-            lastClickCoords = { row, col };
+            lastPixelCoords = { row: coords.row, col: coords.col };
+            lastClickCoords = { row: coords.row, col: coords.col };
         }
     } else if (currentTool === 'bucket') {
         isDrawingShape = false;
         isDragging = false;
-        if (floodFill(row, col, selectedColorIndex)) {
+        if (floodFill(coords.row, coords.col, selectedColorIndex)) {
             changeOccurred = true;
         }
-        lastClickCoords = { row, col };
+        lastClickCoords = { row: coords.row, col: coords.col };
     } else if (['line', 'rectangle', 'circle'].includes(currentTool)) {
         isDrawingShape = true;
         isDragging = true; // Use isDragging to indicate shape drawing is active
@@ -545,15 +624,15 @@ canvas.addEventListener('mousedown', (event) => {
          if (history.length >= MAX_HISTORY) { history.shift(); }
          history.push(deepCopyGrid(gridState));
          console.log(`Starting shape: ${currentTool}`);
-         lastClickCoords = { row, col }; // Update last click
+         lastClickCoords = { row: coords.row, col: coords.col }; // Update last click
     } else if (currentTool === 'select') {
-        if (selectionRect && isInsideRect(row, col, selectionRect)) {
+        if (selectionRect && isInsideRect(coords.row, coords.col, selectionRect)) {
             // --- Start Moving Selection --- 
             isMovingSelection = true;
             isDragging = true; // Use isDragging for move events
-            moveStartCoords = { row, col };
+            moveStartCoords = { row: coords.row, col: coords.col };
             // Calculate offset from top-left corner of selection
-            moveOffset = { dr: row - selectionRect.r1, dc: col - selectionRect.c1 };
+            moveOffset = { dr: coords.row - selectionRect.r1, dc: coords.col - selectionRect.c1 };
 
             copySelectionToBuffer(); // Copy data for the move
 
@@ -573,17 +652,29 @@ canvas.addEventListener('mousedown', (event) => {
             console.log("Starting selection definition.");
             // --- End Start Defining --- 
         }
-        lastClickCoords = { row, col };
+        lastClickCoords = { row: coords.row, col: coords.col };
     } else {
         console.warn(`Tool not implemented: ${currentTool}`);
         isDrawingShape = false;
         isDragging = false;
-        lastClickCoords = { row, col };
+        lastClickCoords = { row: coords.row, col: coords.col };
     }
     // --- End Tool Specific Logic ---
 });
 
 canvas.addEventListener('mousemove', (event) => {
+    if (isPanning && canvasContainer) {
+        const dx = event.clientX - panStart.x;
+        const dy = event.clientY - panStart.y;
+
+        canvasContainer.scrollLeft = scrollStart.x - dx;
+        canvasContainer.scrollTop = scrollStart.y - dy;
+        
+        // The 'scroll' event on canvasContainer will trigger drawGrid and preview updates.
+        event.preventDefault();
+        return;
+    }
+
     if (isDragging) {
         const coords = getPixelCoords(event);
         if (!coords) return;
@@ -638,6 +729,14 @@ canvas.addEventListener('mousemove', (event) => {
 });
 
 canvas.addEventListener('mouseup', (event) => {
+    if (isPanning) {
+        isPanning = false;
+        // If space is still held, cursor remains 'grab', otherwise set to tool cursor
+        canvas.style.cursor = isPanModeActive ? 'grab' : determineCursorForCurrentTool();
+        event.preventDefault();
+        return;
+    }
+
     if (isDragging) {
         let finalizeAction = false;
         let actionMadeChange = false; // Track if the finalized action modified gridState
@@ -765,8 +864,15 @@ canvas.addEventListener('mouseup', (event) => {
 });
 
 canvas.addEventListener('mouseleave', (event) => {
-     clearPreviewCanvas();
-    if (isDragging) {
+    if (isPanning) {
+        isPanning = false;
+        // If space is still held, cursor remains 'grab', otherwise set to tool cursor
+        canvas.style.cursor = isPanModeActive ? 'grab' : determineCursorForCurrentTool();
+        // No specific action needed beyond stopping the pan, as the state is now managed by scroll offsets.
+    }
+
+    clearPreviewCanvas();
+    if (isDragging) { // This is for tool drags, not panning drag
         if (isMovingSelection) {
             console.log("Selection move cancelled (mouse left).");
             changeOccurred = false; // No change was finalized
@@ -1007,19 +1113,70 @@ document.addEventListener('keydown', (event) => {
     }
     // --- End Color Selection Shortcuts ---
 
-});
+    // --- Pan Mode Activation (Spacebar) --- (Restored)
+    if (event.key === ' ' && !isPanModeActive) {
+        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || currentPickerInstance) {
+            return; 
+        }
+        event.preventDefault(); 
+        isPanModeActive = true;
+        canvas.style.cursor = 'grab';
+        return; 
+    }
+    // --- End Pan Mode Activation ---
 
-// Separate listener specifically for Shift key state used in drawing logic
-document.addEventListener('keydown', (event) => {
+    // --- Shift Key State --- (Moved into main keydown listener)
     if (event.key === 'Shift') {
         shiftKeyPressed = true;
     }
+    // --- End Shift Key State ---
 });
+
 document.addEventListener('keyup', (event) => {
+    // --- Shift Key State ---
     if (event.key === 'Shift') {
         shiftKeyPressed = false;
     }
+    // --- End Shift Key State ---
+
+    // --- Pan Mode Deactivation (Spacebar) --- (Restored)
+    if (event.key === ' ') {
+        if (isPanModeActive) {
+            event.preventDefault();
+            isPanModeActive = false;
+            if (!isPanning) { 
+                canvas.style.cursor = determineCursorForCurrentTool();
+            } else {
+                // If still panning (mouse button is down), cursor remains 'grabbing' until mouseup
+                canvas.style.cursor = 'grabbing'; 
+            }
+        }
+    }
+    // --- End Pan Mode Deactivation ---
 });
+
+// --- Window Blur Event --- (Consolidated)
+window.addEventListener('blur', () => {
+    if (isPanModeActive) {
+        isPanModeActive = false;
+        isPanning = false; 
+        canvas.style.cursor = determineCursorForCurrentTool();
+    }
+    // Also reset shift key if window loses focus
+    shiftKeyPressed = false;
+});
+
+// Function to determine appropriate cursor (Restored)
+function determineCursorForCurrentTool() {
+    if (currentTool === 'pencil' || currentTool === 'line' || currentTool === 'rectangle' || currentTool === 'circle') {
+        return 'crosshair';
+    }
+    // Add other tools if they need specific cursors, e.g.:
+    // if (currentTool === 'bucket') return 'url(bucket.cur), default'; 
+    // if (currentTool === 'select') return 'default'; // Or 'move' if over selection
+    return 'default'; // Default cursor
+}
+
 // --- End Keyboard Listeners ---
 
 // --- UI Interaction (Options Panel) ---
@@ -1190,6 +1347,40 @@ function setupOptionsPanel() {
     if (gridRowsInput) gridRowsInput.value = gridRows;
     if (gridColsInput) gridColsInput.value = gridCols;
 
+    // Add scroll listener to the canvas container for redraws
+    if (!canvasContainer) { // Ensure canvasContainer is available
+        canvasContainer = document.getElementById('canvas-container');
+    }
+    if (canvasContainer) {
+        canvasContainer.addEventListener('scroll', () => {
+            drawGrid(); // Redraw the main grid based on new scroll position (will include culling)
+            clearPreviewCanvas();
+            
+            // Redraw active previews based on current state
+            // This logic is similar to what was in mousemove for panning previews
+            const currentMouseLogicalCoords = null; // We don't have mouse event here, so preview based on defined shapes
+
+            if (isDrawingShape && shapeStartX !== null && shapeStartY !== null && lastPixelCoords) {
+                // For shapes, the preview is often defined by start and current mouse (lastPixelCoords)
+                drawPreviewShape(shapeStartY, shapeStartX, lastPixelCoords.row, lastPixelCoords.col, currentTool);
+            } else if (isDefiningSelection && shapeStartX !== null && shapeStartY !== null && lastPixelCoords) {
+                drawPreviewSelection(shapeStartY, shapeStartX, lastPixelCoords.row, lastPixelCoords.col);
+            } else if (isMovingSelection && selectionBuffer && moveOffset && selectionRect && lastPixelCoords) {
+                const newTopLeftRow = lastPixelCoords.row - moveOffset.dr;
+                const newTopLeftCol = lastPixelCoords.col - moveOffset.dc;
+                // eraseAreaOnPreview(selectionRect); // Erasing old might not be needed if clearing full preview
+                drawBufferOnPreview(newTopLeftRow, newTopLeftCol);
+                const r2 = newTopLeftRow + selectionBuffer.height - 1;
+                const c2 = newTopLeftCol + selectionBuffer.width - 1;
+                drawPreviewSelection(newTopLeftRow, newTopLeftCol, r2, c2);
+            } else if (selectionRect && !isDefiningSelection && !isMovingSelection) {
+                 // If there's a static finalized selectionRect, keep it drawn
+                 drawPreviewSelection(selectionRect.r1, selectionRect.c1, selectionRect.r2, selectionRect.c2);
+            }
+        });
+    } else {
+        console.error("#canvas-container not found, scroll listener not added.");
+    }
 }
 // --- End UI Interaction ---
 
@@ -1203,29 +1394,41 @@ reinitializeCanvasAndGrid(); // NEW: Perform initial canvas and grid setup
 
 // --- Grid Configuration Update ---
 function reinitializeCanvasAndGrid() {
-    // Recalculate canvas size
-    canvasWidth = spacing + gridCols * (pixelSize + spacing);
-    canvasHeight = spacing + gridRows * (pixelSize + spacing);
+    if (!canvasContainer) {
+        canvasContainer = document.getElementById('canvas-container');
+        if (!canvasContainer) {
+            console.error("Canvas container not found!");
+            return;
+        }
+    }
 
-    // Size both canvases
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
-    previewCanvas.width = canvasWidth;
-    previewCanvas.height = canvasHeight;
+    // Recalculate logical canvas size based on grid config
+    logicalCanvasWidth = spacing + gridCols * (pixelSize + spacing);
+    logicalCanvasHeight = spacing + gridRows * (pixelSize + spacing);
 
-    console.log(`Canvas re-initialized. Size: ${canvasWidth}x${canvasHeight}, Grid: ${gridRows}x${gridCols}, Pixel: ${pixelSize}, Spacing: ${spacing}`);
+    // Set canvas elements to the logical size
+    canvas.width = logicalCanvasWidth;
+    canvas.height = logicalCanvasHeight;
+    previewCanvas.width = logicalCanvasWidth;
+    previewCanvas.height = logicalCanvasHeight;
 
-    initializeGridState(); // Re-create gridState with new dimensions
+    // Reset scroll position of the container
+    canvasContainer.scrollLeft = 0;
+    canvasContainer.scrollTop = 0;
+
+    console.log(`Canvases sized to logical: ${logicalCanvasWidth}x${logicalCanvasHeight}. Container viewport: ${canvasContainer.clientWidth}x${canvasContainer.clientHeight}. Grid: ${gridRows}x${gridCols}, Pixel: ${pixelSize}, Spacing: ${spacing})`);
+
+    initializeGridState();
     drawGrid(); // Draw the new empty grid
 
-    // Clear history and selection as they are no longer valid
+    // Clear history and selection as they are no longer valid with new grid/view
     history = [];
     selectionRect = null;
     selectionBuffer = null;
-    lastClickCoords = null; // Reset last click for line tool etc.
+    lastClickCoords = null;
     clearPreviewCanvas();
 
-    console.log("Grid configuration applied. History and selection cleared.");
+    console.log("Grid configuration applied. View reset. History and selection cleared.");
 }
 
 function updateGridConfiguration() {

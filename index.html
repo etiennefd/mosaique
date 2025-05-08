@@ -5,20 +5,40 @@
     <!-- Add vanilla-picker CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vanilla-picker@2/dist/vanilla-picker.csp.css">
     <style>
-        body { margin: 0; overflow: hidden; } /* Basic styling */
-        canvas {
-            display: block;
-            position: absolute; /* Position canvases absolutely */
+        body {
+            margin: 0;
+            overflow: hidden; /* Prevent body scrollbars if container is 100vw/vh */
+            font-family: sans-serif; /* Moved from options-panel for consistency */
+        }
+
+        #canvas-container {
+            position: fixed; /* Or absolute if body has no other content */
             top: 0;
             left: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: auto; /* This enables scrollbars */
+            z-index: 1; /* Below options panel */
         }
+
+        /* Canvases are absolutely positioned within the container */
+        #mosaicCanvas,
         #previewCanvas {
-            z-index: 5; /* Preview below options panel, above main */
-            pointer-events: none; /* Allow clicks to pass through to main canvas */
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            /* width/height attributes set by JS to logicalCanvasWidth/Height */
         }
+
+        #previewCanvas {
+            z-index: 5; /* Preview above main canvas */
+            pointer-events: none;
+        }
+
         #mosaicCanvas {
-            z-index: 1;
-            background-color: #FFFFFF; /* Set background on main canvas */
+            z-index: 1; /* Main canvas below preview */
+            background-color: #FFFFFF; /* Keep background on main canvas */
         }
 
         #options-panel {
@@ -30,12 +50,12 @@
             border-radius: 5px;
             padding: 10px;
             box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
-            font-family: sans-serif;
+            /* font-family: sans-serif; removed, moved to body */
             font-size: 12px;
             display: flex;
-            flex-direction: column; /* Stack sections vertically */
-            gap: 10px; /* Spacing between sections */
-            z-index: 10; /* Ensure it's above the canvas */
+            flex-direction: column;
+            gap: 10px;
+            z-index: 10; /* Ensure it's above the canvas-container */
         }
 
         .panel-section {
@@ -111,8 +131,10 @@
     </style>
 </head>
 <body>
-    <canvas id="mosaicCanvas"></canvas>
-    <canvas id="previewCanvas"></canvas>
+    <div id="canvas-container">
+        <canvas id="mosaicCanvas"></canvas>
+        <canvas id="previewCanvas"></canvas>
+    </div>
 
     <div id="options-panel">
         <div class="panel-section tool-options">
