@@ -105,29 +105,46 @@
             gap: 4px;
         }
 
-        .color-options .color-swatch {
+        /* General Color Swatch Styling */
+        .color-swatch {
             width: 20px;
             height: 20px;
             padding: 0; /* Remove padding for swatches */
+            border: 1px solid #aaa; /* Default border, same as tool buttons */
+            display: inline-block; /* Added for general use */
+            vertical-align: middle; /* Added for general use */
+            cursor: pointer; /* Added for general use */
         }
-        .color-options .color-swatch.selected {
+
+        /* Styling for a selected swatch (applies to palette and potentially others if needed) */
+        .color-swatch.selected {
             border: 2px solid black;
             box-shadow: 0 0 3px rgba(0,0,0,0.5);
         }
 
-        /* Style for the non-selectable spacing swatch */
-        .color-options .special-swatch {
-            font-size: 9px; /* Make text smaller */
-            line-height: 20px; /* Vertically center text */
-            text-align: center;
-            color: #555;
-            border-style: dashed; /* Different border */
-        }
+        /* Style for the former special-swatch (can be removed if .special-swatch class is no longer used anywhere) */
+        /* .color-options .special-swatch { ... } */
 
-        /* Optional: Style the picker popup if needed */
-        .picker_wrapper {
-             z-index: 20; /* Ensure picker is above options panel */
+        /* Grid Configuration Section Styling */
+        .grid-config-options div {
+            /* display: block; by default for divs, change this */
+            display: inline-block; /* Allow items to sit on the same line */
+            margin-right: 15px; /* Space between items on the same line */
+            margin-bottom: 5px;  /* Space between lines if they wrap */
+            vertical-align: middle; /* Align items nicely on the line */
         }
+        .grid-config-options label {
+            margin-right: 5px; /* Space between label and input */
+        }
+        .grid-config-options input[type="number"] {
+            width: 50px; /* Adjust width as needed */
+        }
+        /* Ensure the <h4> takes full width or adjust its margin */
+        .grid-config-options h4 {
+            margin-bottom: 8px; /* More space after the heading */
+        }
+        /* The BG color swatch might need slight adjustment if it was in its own div */
+        /* The label for BG color and the swatch itself are in one div, which is now inline-block */
     </style>
 </head>
 <body>
@@ -171,8 +188,8 @@
                 <input type="number" id="spacingInput" min="0" max="5" value="1">
             </div>
             <div>
-                <label for="color-9-label">Background Color:</label>
-                <div class="color-swatch special-swatch" id="color-9" style="background-color: #FFFFFF; display: inline-block; vertical-align: middle;" title="Background/Spacing Color">BG</div>
+                <label for="color-9-label">Background:</label>
+                <div class="color-swatch" id="color-9" style="background-color: #FFFFFF; display: inline-block; vertical-align: middle;" title="Background Color"></div>
             </div>
             <div>
                 <label for="gridRowsInput">Grid Rows (10-500):</label>
