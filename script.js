@@ -264,14 +264,15 @@ function handlePixelChange(row, col, mode, quadrant = null) { // Added quadrant,
         if (currentPixel.fillStyle === 'solid') {
             // If current is solid, change to triangle, unless it's already the target color (no visual change then for solidifying)
             // This case is about dabbing a triangle onto a solid pixel.
-            if (currentPixel.mainColorIndex !== targetColorIndex || currentPixel.fillStyle !== targetTriangleStyle) {
-                 gridState[row][col] = {
-                    mainColorIndex: targetColorIndex,
-                    secondaryColorIndex: defaultPixelColorIndex, 
-                    fillStyle: targetTriangleStyle
-                };
-                changed = true;
-            }
+            // The new triangle's main color is targetColorIndex.
+            // The new triangle's secondary color should be the original solid color.
+            // Change always happens if dabbing a triangle on a solid pixel.
+            gridState[row][col] = {
+                mainColorIndex: targetColorIndex,
+                secondaryColorIndex: currentPixel.mainColorIndex, // Store original solid color as secondary
+                fillStyle: targetTriangleStyle
+            };
+            changed = true;
         } else if (currentPixel.fillStyle.startsWith('triangle-')) {
             if (currentPixel.fillStyle === targetTriangleStyle) {
                 // Clicked same quadrant of an existing triangle
@@ -319,18 +320,25 @@ function handlePixelChange(row, col, mode, quadrant = null) { // Added quadrant,
         // Draw the single updated pixel immediately on the main canvas
         const logicalX = spacing + col * (pixelSize + spacing);
         const logicalY = spacing + row * (pixelSize + spacing);
-
-        // Clear the specific pixel's area with spacingColor first
-        ctx.fillStyle = spacingColor; 
-        ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
-
-        // Then draw the new pixel state
         const pixelToDraw = gridState[row][col];
-        ctx.fillStyle = palette[pixelToDraw.mainColorIndex];
-        
+
         if (pixelToDraw.fillStyle === 'solid') {
+            // For solid pixels, just fill with their main color.
+            // The overall canvas background (spacingColor) handles the rest.
+            ctx.fillStyle = palette[pixelToDraw.mainColorIndex];
             ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
         } else if (pixelToDraw.fillStyle.startsWith('triangle-')) {
+            // For triangle pixels:
+            // 1. Fill the entire pixel cell with its secondaryColorIndex (original solid color).
+            if (pixelToDraw.secondaryColorIndex !== undefined && pixelToDraw.secondaryColorIndex < palette.length) {
+                ctx.fillStyle = palette[pixelToDraw.secondaryColorIndex];
+            } else {
+                ctx.fillStyle = palette[defaultPixelColorIndex]; // Fallback for safety
+            }
+            ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+
+            // 2. Then draw the triangle path with its mainColorIndex on top.
+            ctx.fillStyle = palette[pixelToDraw.mainColorIndex];
             ctx.beginPath();
             if (pixelToDraw.fillStyle === 'triangle-tl') { // Top-left corner
                 ctx.moveTo(logicalX, logicalY); // Top-left
