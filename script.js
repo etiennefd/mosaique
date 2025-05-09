@@ -38,7 +38,7 @@ let currentDragMode = null; // 'draw' or 'erase' (pencil only for now)
 let isDrawingShape = false;
 let shapeStartX = null;
 let shapeStartY = null;
-let isTriangleModeEnabled = false; // Added for triangle mode
+let isTriangleModeEnabled = true; // Added for triangle mode
 
 // Selection State
 let selectionRect = null; // Stores { r1, c1, r2, c2 } of the selected area
