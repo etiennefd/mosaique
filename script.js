@@ -14,7 +14,7 @@ const backgroundColor = '#FFFFFF'; // Canvas background, used for clearing
 // --- End Grid Configuration ---
 
 // --- Palette & State ---
-const palette = [
+let palette = [
     '#00008B', '#0000CD', '#4169E1', // Dark to Royal Blue
     '#6495ED', '#ADD8E6',            // Cornflower to Light Blue
     '#FFD700', '#EEE8AA',            // Gold, Pale Goldenrod
@@ -953,41 +953,104 @@ document.addEventListener('keydown', (event) => {
     // --- Undo Logic (Check this FIRST, as it requires modifiers) ---
     const isUndo = (event.metaKey || event.ctrlKey) && event.key === 'z';
     if (isUndo) {
-         event.preventDefault(); // Prevent browser's default undo behavior
-         if (isDragging) return; // Don't allow undo while dragging/shaping
+         event.preventDefault(); // Prevent browser's default undo behavior (e.g., for focused inputs)
+         
+         // If an input field is focused, blur it to ensure our undo takes full control
+         if (document.activeElement && 
+             (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+             document.activeElement.blur();
+         }
+
+         if (isDragging) return; 
  
          if (history.length > 0) {
              const previousState = history.pop(); 
 
-             // Restore Grid
-             gridState = previousState.grid || gridState;
+             // Check if this state includes full grid configuration
+             if (previousState.config) {
+                 console.log("Undo: Restoring previous grid configuration.");
+                 gridState = previousState.grid; 
 
-             // Restore Palette (if present)
-             if (previousState.pal) {
-                 palette = previousState.pal;
-                 palette.forEach((color, index) => {
-                      // Update swatches 0-8
-                      if (index < 9) {
-                           const swatch = document.getElementById(`color-${index}`);
-                           if (swatch) swatch.style.backgroundColor = color;
-                      }
-                 });
-                 console.log("Restored palette state.");
-             }
+                 gridRows = previousState.config.rows;
+                 gridCols = previousState.config.cols;
+                 pixelSize = previousState.config.pixelSize;
+                 spacing = previousState.config.spacing;
 
-             // Restore Spacing Color (if present)
-             if (typeof previousState.spacing !== 'undefined') {
-                 spacingColor = previousState.spacing;
-                 const spacingSwatch = document.getElementById('color-9');
-                 if (spacingSwatch) spacingSwatch.style.backgroundColor = spacingColor;
-                 console.log("Restored spacing color state.");
+                 // Update UI input fields (ensure these elements exist)
+                 const psInput = document.getElementById('pixelSizeInput');
+                 if (psInput) psInput.value = pixelSize;
+                 const spInput = document.getElementById('spacingInput');
+                 if (spInput) spInput.value = spacing;
+                 const grInput = document.getElementById('gridRowsInput');
+                 if (grInput) grInput.value = gridRows;
+                 const gcInput = document.getElementById('gridColsInput');
+                 if (gcInput) gcInput.value = gridCols;
+
+                 if (previousState.pal) {
+                     palette = previousState.pal;
+                     palette.forEach((color, index) => {
+                         if (index < 9) {
+                             const swatch = document.getElementById(`color-${index}`);
+                             if (swatch) swatch.style.backgroundColor = color;
+                         }
+                     });
+                 }
+                 if (typeof previousState.spacingColor !== 'undefined') {
+                     spacingColor = previousState.spacingColor;
+                     const spacingSwatch = document.getElementById('color-9');
+                     if (spacingSwatch) spacingSwatch.style.backgroundColor = spacingColor;
+                 }
+
+                 console.log("[UNDO_CONFIG] Globals restored. pixelSize:", pixelSize, "gridRows:", gridRows);
+                 console.log("[UNDO_CONFIG] gridState[0][0] should be from previousState:", gridState[0] ? gridState[0][0] : 'N/A');
+                 console.log("[UNDO_CONFIG] previousState.config.pixelSize:", previousState.config.pixelSize, "previousState.config.rows:", previousState.config.rows);
+
+                 reinitializeCanvasAndGrid(deepCopyGrid(gridState), previousState.config);
+
              } else {
-                 // If old state didn't have spacing, maybe default it?
-                 // spacingColor = '#FFFFFF'; // Optional: reset if restoring very old state
-             }
+                 // Standard undo for drawing actions, direct palette changes, or direct spacing color changes
+                 console.log("Undo: Restoring previous drawing/palette/spacing state.");
 
-             drawGrid(); 
-             clearPreviewCanvas(); 
+                 if (Array.isArray(previousState)) {
+                     // This was a simple drawing action, previousState is the grid itself
+                     gridState = previousState; 
+                 } else if (previousState.grid) {
+                     // This was a palette or spacing color change, or another complex state
+                     gridState = previousState.grid; // Restore grid
+                     if (previousState.pal) {
+                         palette = previousState.pal;
+                         palette.forEach((color, index) => {
+                             if (index < 9) {
+                                 const swatch = document.getElementById(`color-${index}`);
+                                 if (swatch) swatch.style.backgroundColor = color;
+                             }
+                         });
+                         console.log("Restored palette state.");
+                     }
+                     // Use previousState.spacingColor consistent with how config history saves it
+                     if (typeof previousState.spacingColor !== 'undefined') { 
+                         spacingColor = previousState.spacingColor;
+                         const spacingSwatch = document.getElementById('color-9');
+                         if (spacingSwatch) spacingSwatch.style.backgroundColor = spacingColor;
+                         console.log("Restored spacing color state.");
+                     } else if (typeof previousState.spacing !== 'undefined') { // Fallback for older history items
+                         spacingColor = previousState.spacing;
+                         const spacingSwatch = document.getElementById('color-9');
+                         if (spacingSwatch) spacingSwatch.style.backgroundColor = spacingColor;
+                         console.log("Restored spacing color state (using fallback .spacing).");
+                     }
+                 } else {
+                     // Should not happen if history is pushed correctly, but as a fallback:
+                     console.warn("Undo: Encountered unknown history state type.");
+                     // Potentially try to restore gridState if previousState itself seems like a grid
+                     // For now, do nothing more to avoid errors.
+                 }
+                 drawGrid(); // Redraw the main canvas for non-config changes
+             }
+             clearPreviewCanvas();
+             if (selectionRect) {
+                 drawPreviewSelection(selectionRect.r1, selectionRect.c1, selectionRect.r2, selectionRect.c2);
+             }
              console.log(`Undo executed. History size: ${history.length}`);
          } else {
              console.log("Nothing to undo.");
@@ -1456,19 +1519,18 @@ function reinitializeCanvasAndGrid(oldGridData, oldConfig) {
         }
     }
 
-    // If oldGridData is not provided (e.g., initial setup), create a fresh grid
     if (!oldGridData || !oldConfig) {
         gridState = createNewGridStateFromOld(null, 0, 0, gridRows, gridCols);
     } else {
-        // Only create new grid state if dimensions changed.
-        // If only pixel/spacing changed, gridState content remains the same.
         if (gridRows !== oldConfig.rows || gridCols !== oldConfig.cols) {
             gridState = createNewGridStateFromOld(oldGridData, oldConfig.rows, oldConfig.cols, gridRows, gridCols);
         } else {
-            // Dimensions are the same, pixel/spacing changed. gridState content is already correct (it's oldGridData).
-            // No need to reassign gridState if oldGridData was a deep copy of the original gridState.
-            // However, if oldGridData IS gridState, this path is fine.
-            // The key is that createNewGridStateFromOld is NOT called if dimensions are identical.
+            // Dimensions are the same, pixel/spacing changed. 
+            // gridState should be oldGridData if it was passed correctly as a deep copy.
+            // If updateGridConfiguration passes a deepCopy of current gridState as oldGridData,
+            // and then updates globals, and THEN calls reinitialize, then gridState is already correct.
+            // Let's ensure gridState IS the oldGridData if dimensions haven't changed.
+            gridState = oldGridData; 
         }
     }
 
@@ -1480,36 +1542,25 @@ function reinitializeCanvasAndGrid(oldGridData, oldConfig) {
     previewCanvas.width = logicalCanvasWidth;
     previewCanvas.height = logicalCanvasHeight;
 
-    canvasContainer.scrollLeft = 0;
-    canvasContainer.scrollTop = 0;
+    // Only reset scroll if the logical size might have changed affecting scroll extents.
+    // This happens if rows, cols, pixelSize or spacing change.
+    // We can simplify: always reset scroll on reinitialize for now.
+    if (canvasContainer) {
+        canvasContainer.scrollLeft = 0;
+        canvasContainer.scrollTop = 0;
+    }
 
     console.log(`Canvases re-initialized. Logical: ${logicalCanvasWidth}x${logicalCanvasHeight}. Grid: ${gridRows}x${gridCols}, Px: ${pixelSize}, Sp: ${spacing}`);
 
     drawGrid();
 
-    // Clear history and selection if any relevant configuration changed
-    let configChanged = false;
-    if (oldConfig) { // Only check if oldConfig was actually passed
-        if (gridRows !== oldConfig.rows || gridCols !== oldConfig.cols || 
-            pixelSize !== oldConfig.pixelSize || spacing !== oldConfig.spacing) {
-            configChanged = true;
-        }
-    }
-
-    if (configChanged || !oldConfig) { // Clear if config changed OR it's the initial setup
-        history = [];
+    // If a config change happened that invalidates selection, the caller (updateGridConfiguration) should clear it.
+    // For example, if gridRows/gridCols changed.
+    if (oldConfig && (gridRows !== oldConfig.rows || gridCols !== oldConfig.cols)){
         selectionRect = null;
         selectionBuffer = null;
-        lastClickCoords = null;
-        clearPreviewCanvas(); // Clear any lingering previews
-        console.log("Grid configuration changed. History and selection cleared.");
-    } else {
-        console.log("Grid configuration updated (only visual parameters); history and selection preserved.");
-        // If we reached here, only pixel/spacing changed AND we decided to preserve history.
-        // For now, this branch is less likely due to the broader clearing condition above.
-        // To truly preserve history for pixel/spacing changes, the `configChanged` condition 
-        // would need to be only `gridRows !== oldConfig.rows || gridCols !== oldConfig.cols`
-        // and undo for pixel/spacing changes would need specific handling.
+        clearPreviewCanvas(); // Clear selection preview
+        console.log("Grid dimensions changed, selection cleared.");
     }
 }
 
@@ -1519,28 +1570,38 @@ function updateGridConfiguration() {
     const newGridRows = parseInt(document.getElementById('gridRowsInput').value, 10);
     const newGridCols = parseInt(document.getElementById('gridColsInput').value, 10);
 
-    // --- Validation --- (existing validation logic)
-    if (isNaN(newPixelSize) || newPixelSize < 1 || newPixelSize > 15) { /*...*/ return; }
-    if (isNaN(newSpacingSize) || newSpacingSize < 0 || newSpacingSize > 5) { /*...*/ return; }
-    if (isNaN(newGridRows) || newGridRows < 10 || newGridRows > 500) { /*...*/ return; }
-    if (isNaN(newGridCols) || newGridCols < 10 || newGridCols > 800) { /*...*/ return; }
-    // --- End Validation ---
+    // Validation (user updated limits, ensure these are reflected)
+    if (isNaN(newPixelSize) || newPixelSize < 1 || newPixelSize > 15) { alert("Pixel Size must be between 1 and 15."); return; }
+    if (isNaN(newSpacingSize) || newSpacingSize < 0 || newSpacingSize > 5) { alert("Spacing Size must be between 0 and 5."); return; }
+    if (isNaN(newGridRows) || newGridRows < 10 || newGridRows > 500) { alert("Grid Rows must be between 10 and 500."); return; }
+    if (isNaN(newGridCols) || newGridCols < 10 || newGridCols > 800) { alert("Grid Columns must be between 10 and 800."); return; }
 
     if (newPixelSize === pixelSize && newSpacingSize === spacing && newGridRows === gridRows && newGridCols === gridCols) {
         console.log("No grid configuration changes detected.");
         return;
     }
 
-    console.log("Updating grid configuration...");
+    console.log("Saving current state for undo (grid config change)...");
+    // Save current grid AND its configuration BEFORE changing globals
+    if (history.length >= MAX_HISTORY) {
+        history.shift();
+    }
+    history.push({
+        grid: deepCopyGrid(gridState),
+        config: {
+            rows: gridRows,
+            cols: gridCols,
+            pixelSize: pixelSize,
+            spacing: spacing
+        },
+        // Also include palette and spacingColor for completeness if other history items do
+        pal: [...palette],
+        spacingColor: spacingColor 
+    });
+    console.log(`State saved (Config Change). History size: ${history.length}`);
 
-    // Capture current state and config BEFORE updating globals
-    const oldGridData = deepCopyGrid(gridState); // Crucial deep copy
-    const oldConfig = {
-        rows: gridRows,
-        cols: gridCols,
-        pixelSize: pixelSize,
-        spacing: spacing
-    };
+    const oldGridDataForReinit = deepCopyGrid(gridState); // This is the state BEFORE globals change
+    const oldConfigForReinit = { rows: gridRows, cols: gridCols, pixelSize: pixelSize, spacing: spacing };
 
     // Update global variables
     pixelSize = newPixelSize;
@@ -1548,5 +1609,7 @@ function updateGridConfiguration() {
     gridRows = newGridRows;
     gridCols = newGridCols;
 
-    reinitializeCanvasAndGrid(oldGridData, oldConfig); // Pass old data
+    // Pass the state *before* global update, and its config, to reinitialize.
+    // reinitializeCanvasAndGrid will handle creating the new gridState based on this.
+    reinitializeCanvasAndGrid(oldGridDataForReinit, oldConfigForReinit);
 } 
