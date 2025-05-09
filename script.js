@@ -6,7 +6,7 @@ const previewCtx = previewCanvas.getContext('2d');
 // --- Grid Configuration ---
 let gridRows = 200;
 let gridCols = 400;
-let pixelSize = 5;
+let pixelSize = 15;
 let spacing = 1;
 // const defaultColor = '#E0E0E0'; // Replaced by palette
 // const activeColor = '#0000FF';   // Replaced by palette
