@@ -38,6 +38,7 @@ let currentDragMode = null; // 'draw' or 'erase' (pencil only for now)
 let isDrawingShape = false;
 let shapeStartX = null;
 let shapeStartY = null;
+let isTriangleModeEnabled = false; // Added for triangle mode
 
 // Selection State
 let selectionRect = null; // Stores { r1, c1, r2, c2 } of the selected area
@@ -1357,6 +1358,9 @@ function setupOptionsPanel() {
     const toolButtons = document.querySelectorAll('.tool-options button');
     const colorSwatches = document.querySelectorAll('.color-options .color-swatch:not(#color-9)'); // Select palette swatches 0-8
     const spacingSwatchElement = document.getElementById('color-9'); // Get spacing swatch directly
+    const toolSpecificOptionsPanel = document.getElementById('tool-specific-options-panel');
+    const pencilOptionsDiv = document.getElementById('pencil-options');
+    const triangleModeCheckbox = document.getElementById('triangleModeCheckbox');
 
     updateSelectedSwatch = (newIndex) => {
         // Remove selected class from previously selected swatch
@@ -1382,6 +1386,21 @@ function setupOptionsPanel() {
         }
         currentTool = newToolId.replace('tool-', ''); // Extract tool name
         console.log(`Tool selected: ${currentTool}`);
+
+        // Show/hide pencil-specific options
+        if (toolSpecificOptionsPanel && pencilOptionsDiv) {
+            if (currentTool === 'pencil') {
+                toolSpecificOptionsPanel.style.display = 'block';
+                pencilOptionsDiv.style.display = 'block';
+            } else {
+                // Hide pencil options if another tool is selected
+                pencilOptionsDiv.style.display = 'none';
+                // Hide the whole panel if no tool has specific options visible
+                // For now, only pencil has options, so we can hide the parent panel directly.
+                // If other tools get options, this logic needs to be more nuanced.
+                toolSpecificOptionsPanel.style.display = 'none';
+            }
+        }
 
         // Update canvas cursor based on the new tool (removed isPanModeActive check)
         canvas.style.cursor = determineCursorForCurrentTool();
@@ -1476,6 +1495,14 @@ function setupOptionsPanel() {
         // Add dblclick listener solely to prevent default text selection behavior
         swatch.addEventListener('dblclick', openPickerHandler);
     });
+
+    // Triangle Mode Checkbox Listener
+    if (triangleModeCheckbox) {
+        triangleModeCheckbox.addEventListener('change', (event) => {
+            isTriangleModeEnabled = event.target.checked;
+            console.log(`Triangle mode ${isTriangleModeEnabled ? 'enabled' : 'disabled'}`);
+        });
+    }
 
     // --- Refactored Spacing Color Picker Logic ---
     function openSpacingColorPicker(event) {
