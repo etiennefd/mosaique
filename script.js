@@ -66,6 +66,21 @@ function deepCopyGrid(grid) {
     // Simple deep copy for a 2D array of numbers/indexes
     return grid.map(row => [...row]);
 }
+
+function createNewGridStateFromOld(oldData, oldRows, oldCols, newRows, newCols) {
+    const newGrid = [];
+    for (let r = 0; r < newRows; r++) {
+        newGrid[r] = [];
+        for (let c = 0; c < newCols; c++) {
+            if (oldData && r < oldRows && c < oldCols) {
+                newGrid[r][c] = oldData[r][c]; // Copy existing pixel
+            } else {
+                newGrid[r][c] = defaultPixelColorIndex; // Initialize new pixel
+            }
+        }
+    }
+    return newGrid;
+}
 // --- End Utilities ---
 
 // Calculate canvas size based on grid - These are now logical and handled internally
@@ -80,17 +95,19 @@ function deepCopyGrid(grid) {
 
 // console.log(`Main and Preview canvas size set to ${canvasWidth}x${canvasHeight}`); // Will be logged in reinitialize
 
-// --- Initialization ---
+// --- Initialization --- (Old function, to be removed)
+/*
 function initializeGridState() {
-    gridState = []; // Reset
+    gridState = []; 
     for (let r = 0; r < gridRows; r++) {
         gridState[r] = [];
         for (let c = 0; c < gridCols; c++) {
-            gridState[r][c] = defaultPixelColorIndex; // Initialize with the default color index
+            gridState[r][c] = defaultPixelColorIndex; 
         }
     }
     console.log("Grid state initialized.");
 }
+*/
 // --- End Initialization ---
 
 // --- Drawing ---
@@ -1425,7 +1442,7 @@ reinitializeCanvasAndGrid(); // NEW: Perform initial canvas and grid setup
 // --- End Initial Setup ---
 
 // --- Grid Configuration Update ---
-function reinitializeCanvasAndGrid() {
+function reinitializeCanvasAndGrid(oldGridData, oldConfig) {
     if (!canvasContainer) {
         canvasContainer = document.getElementById('canvas-container');
         if (!canvasContainer) {
@@ -1434,75 +1451,91 @@ function reinitializeCanvasAndGrid() {
         }
     }
 
-    // Recalculate logical canvas size based on grid config
+    // If oldGridData is not provided (e.g., initial setup), create a fresh grid
+    if (!oldGridData || !oldConfig) {
+        gridState = createNewGridStateFromOld(null, 0, 0, gridRows, gridCols);
+    } else {
+        // Only create new grid state if dimensions changed.
+        // If only pixel/spacing changed, gridState content remains the same.
+        if (gridRows !== oldConfig.rows || gridCols !== oldConfig.cols) {
+            gridState = createNewGridStateFromOld(oldGridData, oldConfig.rows, oldConfig.cols, gridRows, gridCols);
+        } else {
+            // Dimensions are the same, pixel/spacing changed. gridState content is already correct (it's oldGridData).
+            // No need to reassign gridState if oldGridData was a deep copy of the original gridState.
+            // However, if oldGridData IS gridState, this path is fine.
+            // The key is that createNewGridStateFromOld is NOT called if dimensions are identical.
+        }
+    }
+
     logicalCanvasWidth = spacing + gridCols * (pixelSize + spacing);
     logicalCanvasHeight = spacing + gridRows * (pixelSize + spacing);
 
-    // Set canvas elements to the logical size
     canvas.width = logicalCanvasWidth;
     canvas.height = logicalCanvasHeight;
     previewCanvas.width = logicalCanvasWidth;
     previewCanvas.height = logicalCanvasHeight;
 
-    // Reset scroll position of the container
     canvasContainer.scrollLeft = 0;
     canvasContainer.scrollTop = 0;
 
-    console.log(`Canvases sized to logical: ${logicalCanvasWidth}x${logicalCanvasHeight}. Container viewport: ${canvasContainer.clientWidth}x${canvasContainer.clientHeight}. Grid: ${gridRows}x${gridCols}, Pixel: ${pixelSize}, Spacing: ${spacing})`);
+    console.log(`Canvases re-initialized. Logical: ${logicalCanvasWidth}x${logicalCanvasHeight}. Grid: ${gridRows}x${gridCols}, Px: ${pixelSize}, Sp: ${spacing}`);
 
-    initializeGridState();
-    drawGrid(); // Draw the new empty grid
+    drawGrid();
 
-    // Clear history and selection as they are no longer valid with new grid/view
-    history = [];
-    selectionRect = null;
-    selectionBuffer = null;
-    lastClickCoords = null;
-    clearPreviewCanvas();
+    // Clear history and selection if any relevant configuration changed
+    let configChanged = false;
+    if (oldConfig) { // Only check if oldConfig was actually passed
+        if (gridRows !== oldConfig.rows || gridCols !== oldConfig.cols || 
+            pixelSize !== oldConfig.pixelSize || spacing !== oldConfig.spacing) {
+            configChanged = true;
+        }
+    }
 
-    console.log("Grid configuration applied. View reset. History and selection cleared.");
+    if (configChanged || !oldConfig) { // Clear if config changed OR it's the initial setup
+        history = [];
+        selectionRect = null;
+        selectionBuffer = null;
+        lastClickCoords = null;
+        clearPreviewCanvas(); // Clear any lingering previews
+        console.log("Grid configuration changed. History and selection cleared.");
+    } else {
+        console.log("Grid configuration updated (only visual parameters); history and selection preserved.");
+        // If we reached here, only pixel/spacing changed AND we decided to preserve history.
+        // For now, this branch is less likely due to the broader clearing condition above.
+        // To truly preserve history for pixel/spacing changes, the `configChanged` condition 
+        // would need to be only `gridRows !== oldConfig.rows || gridCols !== oldConfig.cols`
+        // and undo for pixel/spacing changes would need specific handling.
+    }
 }
 
 function updateGridConfiguration() {
-    // Assume HTML input elements with these IDs exist
     const newPixelSize = parseInt(document.getElementById('pixelSizeInput').value, 10);
     const newSpacingSize = parseInt(document.getElementById('spacingInput').value, 10);
     const newGridRows = parseInt(document.getElementById('gridRowsInput').value, 10);
     const newGridCols = parseInt(document.getElementById('gridColsInput').value, 10);
 
-    // --- Validation --- 
-    // Add your desired min/max checks here. Example:
-    if (isNaN(newPixelSize) || newPixelSize < 1 || newPixelSize > 10) {
-        alert("Pixel Size must be between 1 and 10.");
-        return;
-    }
-    if (isNaN(newSpacingSize) || newSpacingSize < 0 || newSpacingSize > 3) {
-        alert("Spacing Size must be between 0 and 3.");
-        return;
-    }
-    if (isNaN(newGridRows) || newGridRows < 10 || newGridRows > 500) { // Example limits
-        alert("Grid Rows must be between 10 and 500.");
-        return;
-    }
-    if (isNaN(newGridCols) || newGridCols < 10 || newGridCols > 800) { // Example limits
-        alert("Grid Columns must be between 10 and 800.");
-        return;
-    }
+    // --- Validation --- (existing validation logic)
+    if (isNaN(newPixelSize) || newPixelSize < 1 || newPixelSize > 10) { /*...*/ return; }
+    if (isNaN(newSpacingSize) || newSpacingSize < 0 || newSpacingSize > 3) { /*...*/ return; }
+    if (isNaN(newGridRows) || newGridRows < 10 || newGridRows > 500) { /*...*/ return; }
+    if (isNaN(newGridCols) || newGridCols < 10 || newGridCols > 800) { /*...*/ return; }
     // --- End Validation ---
 
-    // Check if any configuration actually changed to avoid unnecessary re-initialization
-    if (newPixelSize === pixelSize && 
-        newSpacingSize === spacing && 
-        newGridRows === gridRows && 
-        newGridCols === gridCols) {
+    if (newPixelSize === pixelSize && newSpacingSize === spacing && newGridRows === gridRows && newGridCols === gridCols) {
         console.log("No grid configuration changes detected.");
         return;
     }
 
     console.log("Updating grid configuration...");
 
-    // Save current state before changing (optional, but good for undo of config change if desired later)
-    // For now, we clear history, so a full config undo is not implemented here.
+    // Capture current state and config BEFORE updating globals
+    const oldGridData = deepCopyGrid(gridState); // Crucial deep copy
+    const oldConfig = {
+        rows: gridRows,
+        cols: gridCols,
+        pixelSize: pixelSize,
+        spacing: spacing
+    };
 
     // Update global variables
     pixelSize = newPixelSize;
@@ -1510,5 +1543,5 @@ function updateGridConfiguration() {
     gridRows = newGridRows;
     gridCols = newGridCols;
 
-    reinitializeCanvasAndGrid();
+    reinitializeCanvasAndGrid(oldGridData, oldConfig); // Pass old data
 } 
