@@ -26,7 +26,7 @@ const erasePixelColorIndex = 8;   // Index of color to use when "erasing" (Pale 
 let spacingColor = '#FFFFFF'; // NEW: Dedicated variable for spacing color
 
 let selectedColorIndex = 0; // Default to the first color (Dark Blue)
-let gridState = []; // 2D array to store pixel state (now stores color index)
+let gridState = []; // 2D array to store pixel state (now stores pixel objects)
 let history = [];   // Array to store previous grid states for undo
 const MAX_HISTORY = 50; // Limit undo history size
 let isDragging = false;
@@ -64,7 +64,9 @@ let canvasContainer = null; // Will be initialized in setup
 // --- Utilities ---
 function deepCopyGrid(grid) {
     // Simple deep copy for a 2D array of numbers/indexes
-    return grid.map(row => [...row]);
+    // return grid.map(row => [...row]);
+    // Deep copy for a 2D array of pixel objects
+    return grid.map(row => row.map(pixel => ({ ...pixel })));
 }
 
 function createNewGridStateFromOld(oldData, oldRows, oldCols, newRows, newCols) {
@@ -73,9 +75,24 @@ function createNewGridStateFromOld(oldData, oldRows, oldCols, newRows, newCols) 
         newGrid[r] = [];
         for (let c = 0; c < newCols; c++) {
             if (oldData && r < oldRows && c < oldCols) {
-                newGrid[r][c] = oldData[r][c]; // Copy existing pixel
+                // Ensure existing pixel data is copied as an object, or adapt if oldData is pre-object format
+                if (typeof oldData[r][c] === 'object' && oldData[r][c] !== null) {
+                    newGrid[r][c] = { ...oldData[r][c] };
+                } else {
+                    // If oldData was just an index, convert it to the new object structure
+                    newGrid[r][c] = {
+                        mainColorIndex: oldData[r][c], // Assuming old data was the color index
+                        secondaryColorIndex: defaultPixelColorIndex,
+                        fillStyle: 'solid'
+                    };
+                }
             } else {
-                newGrid[r][c] = defaultPixelColorIndex; // Initialize new pixel
+                // newGrid[r][c] = defaultPixelColorIndex; // Initialize new pixel
+                newGrid[r][c] = {
+                    mainColorIndex: defaultPixelColorIndex,
+                    secondaryColorIndex: defaultPixelColorIndex,
+                    fillStyle: 'solid'
+                };
             }
         }
     }
@@ -142,10 +159,23 @@ function drawGrid() {
             //     continue;
             // }
 
-            const colorIndex = gridState[r][c];
-            if (colorIndex >= 0 && colorIndex < 9) {
-                ctx.fillStyle = palette[colorIndex] || palette[defaultPixelColorIndex];
+            const pixel = gridState[r][c];
+            // const colorIndex = gridState[r][c];
+            // if (colorIndex >= 0 && colorIndex < 9) {
+            //     ctx.fillStyle = palette[colorIndex] || palette[defaultPixelColorIndex];
+            // } else {
+            //     ctx.fillStyle = palette[defaultPixelColorIndex];
+            // }
+
+            // For now, always draw the mainColorIndex. Triangle logic will be added later.
+            if (pixel && typeof pixel.mainColorIndex === 'number') {
+                if (pixel.mainColorIndex >= 0 && pixel.mainColorIndex < 9) {
+                    ctx.fillStyle = palette[pixel.mainColorIndex];
+                } else {
+                    ctx.fillStyle = palette[defaultPixelColorIndex];
+                }
             } else {
+                 // Fallback if pixel data is malformed, though createNewGridStateFromOld should prevent this
                 ctx.fillStyle = palette[defaultPixelColorIndex];
             }
             ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
@@ -181,26 +211,30 @@ function getPixelCoords(event) {
 }
 
 function handlePixelChange(row, col, mode) {
-    const currentPixelIndex = gridState[row][col];
-    let newPixelIndex;
+    const currentPixel = gridState[row][col];
+    let newMainColorIndex;
 
     if (mode === 'draw') {
-        newPixelIndex = selectedColorIndex;
+        newMainColorIndex = selectedColorIndex;
     } else { // mode === 'erase'
-        newPixelIndex = erasePixelColorIndex;
+        newMainColorIndex = erasePixelColorIndex;
     }
 
-    if (currentPixelIndex !== newPixelIndex) {
-        gridState[row][col] = newPixelIndex;
-        ctx.fillStyle = palette[newPixelIndex];
+    if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== newMainColorIndex) {
+        gridState[row][col] = {
+            mainColorIndex: newMainColorIndex,
+            secondaryColorIndex: defaultPixelColorIndex,
+            fillStyle: 'solid'
+        };
+        ctx.fillStyle = palette[newMainColorIndex];
         const logicalX = spacing + col * (pixelSize + spacing);
         const logicalY = spacing + row * (pixelSize + spacing);
 
         // REMOVED visibility check based on screenX/Y. Draw directly.
         ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
-        return true; 
+        return true;
     }
-    return false; 
+    return false;
 }
 
 // --- Line Drawing Utility ---
@@ -242,12 +276,16 @@ function drawLineBetweenPixels(r1, c1, r2, c2, mode) {
 
 // --- Flood Fill Utility ---
 function floodFill(startRow, startCol, fillColorIndex) {
-    const startColorIndex = gridState[startRow][startCol];
+    const startPixel = gridState[startRow][startCol];
+    // const startColorIndex = gridState[startRow][startCol];
 
-    if (startColorIndex === fillColorIndex) {
-        console.log("Fill color is the same as start color, skipping fill.");
+    // For now, flood fill only works on solid pixels of the matching mainColorIndex
+    if (startPixel.fillStyle !== 'solid' || startPixel.mainColorIndex === fillColorIndex) {
+        console.log("Fill condition not met (not solid or same color), skipping fill.");
         return false; // No change needed
     }
+    const startMainColorIndex = startPixel.mainColorIndex;
+
 
     // Save state before filling for undo
     if (history.length >= MAX_HISTORY) {
@@ -271,12 +309,18 @@ function floodFill(startRow, startCol, fillColorIndex) {
         const [row, col] = queue.shift();
 
         // Bounds check and color check before processing
-        if (row < 0 || row >= gridRows || col < 0 || col >= gridCols || gridState[row][col] !== startColorIndex) {
+        if (row < 0 || row >= gridRows || col < 0 || col >= gridCols ||
+            gridState[row][col].fillStyle !== 'solid' || gridState[row][col].mainColorIndex !== startMainColorIndex) {
             continue;
         }
 
         // Change color and mark as processed (by changing color)
-        gridState[row][col] = fillColorIndex;
+        // gridState[row][col] = fillColorIndex;
+        gridState[row][col] = {
+            mainColorIndex: fillColorIndex,
+            secondaryColorIndex: defaultPixelColorIndex,
+            fillStyle: 'solid'
+        };
         pixelsChanged++;
 
         // Add neighbors to the queue
@@ -378,8 +422,17 @@ function getCirclePixels(r1, c1, r2, c2) {
 function applyPixelsToGrid(pixels, colorIndex) {
     let changed = false;
     pixels.forEach(([r, c]) => {
-        if (gridState[r][c] !== colorIndex) {
-            gridState[r][c] = colorIndex;
+        // if (gridState[r][c] !== colorIndex) {
+        //     gridState[r][c] = colorIndex;
+        //     changed = true;
+        // }
+        const currentPixel = gridState[r][c];
+        if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== colorIndex) {
+            gridState[r][c] = {
+                mainColorIndex: colorIndex,
+                secondaryColorIndex: defaultPixelColorIndex,
+                fillStyle: 'solid'
+            };
             changed = true;
         }
     });
@@ -407,9 +460,13 @@ function copySelectionToBuffer() {
             const sourceCol = c1 + c;
             // Check bounds just in case selection rect is somehow invalid
             if (sourceRow >= 0 && sourceRow < gridRows && sourceCol >= 0 && sourceCol < gridCols) {
-                 data[r][c] = gridState[sourceRow][sourceCol];
+                 data[r][c] = { ...gridState[sourceRow][sourceCol] }; // Copy the pixel object
             } else {
-                 data[r][c] = defaultPixelColorIndex; // Fallback
+                 data[r][c] = {
+                     mainColorIndex: defaultPixelColorIndex,
+                     secondaryColorIndex: defaultPixelColorIndex,
+                     fillStyle: 'solid'
+                 }; // Fallback
             }
         }
     }
@@ -426,8 +483,17 @@ function eraseGridArea(rect) {
     for (let r = r1; r <= r2; r++) {
         for (let c = c1; c <= c2; c++) {
             if (r >= 0 && r < gridRows && c >= 0 && c < gridCols) {
-                if (gridState[r][c] !== erasePixelColorIndex) {
-                    gridState[r][c] = erasePixelColorIndex;
+                // if (gridState[r][c] !== erasePixelColorIndex) {
+                //     gridState[r][c] = erasePixelColorIndex;
+                //     changed = true;
+                // }
+                const currentPixel = gridState[r][c];
+                if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== erasePixelColorIndex) {
+                    gridState[r][c] = {
+                        mainColorIndex: erasePixelColorIndex,
+                        secondaryColorIndex: defaultPixelColorIndex,
+                        fillStyle: 'solid'
+                    };
                     changed = true;
                 }
             }
@@ -447,10 +513,20 @@ function pasteBufferToGrid(targetTopRow, targetLeftCol) {
         for (let c = 0; c < width; c++) {
             const targetRow = targetTopRow + r;
             const targetCol = targetLeftCol + c;
+            const sourcePixel = data[r][c]; // This is a pixel object from the buffer
 
             if (targetRow >= 0 && targetRow < gridRows && targetCol >= 0 && targetCol < gridCols) {
-                if (gridState[targetRow][targetCol] !== data[r][c]) {
-                     gridState[targetRow][targetCol] = data[r][c];
+                // if (gridState[targetRow][targetCol] !== data[r][c]) {
+                //      gridState[targetRow][targetCol] = data[r][c];
+                //      changed = true;
+                // }
+                const currentTargetPixel = gridState[targetRow][targetCol];
+                // Compare objects - for now, a simple mainColorIndex and fillStyle check is enough.
+                // Later, this might need a more robust comparison if secondaryColorIndex becomes important.
+                if (currentTargetPixel.fillStyle !== sourcePixel.fillStyle ||
+                    currentTargetPixel.mainColorIndex !== sourcePixel.mainColorIndex ||
+                    (sourcePixel.fillStyle !== 'solid' && currentTargetPixel.secondaryColorIndex !== sourcePixel.secondaryColorIndex) ) {
+                     gridState[targetRow][targetCol] = { ...sourcePixel }; // Paste the copied pixel object
                      changed = true;
                 }
             }
@@ -1002,7 +1078,7 @@ document.addEventListener('keydown', (event) => {
                  }
 
                  console.log("[UNDO_CONFIG] Globals restored. pixelSize:", pixelSize, "gridRows:", gridRows);
-                 console.log("[UNDO_CONFIG] gridState[0][0] should be from previousState:", gridState[0] ? gridState[0][0] : 'N/A');
+                 console.log("[UNDO_CONFIG] gridState[0][0] should be from previousState:", gridState[0] && gridState[0][0] ? gridState[0][0].mainColorIndex : 'N/A');
                  console.log("[UNDO_CONFIG] previousState.config.pixelSize:", previousState.config.pixelSize, "previousState.config.rows:", previousState.config.rows);
 
                  reinitializeCanvasAndGrid(deepCopyGrid(gridState), previousState.config);
@@ -1574,12 +1650,12 @@ function reinitializeCanvasAndGrid(oldGridData, oldConfig) {
         if (gridRows !== oldConfig.rows || gridCols !== oldConfig.cols) {
             gridState = createNewGridStateFromOld(oldGridData, oldConfig.rows, oldConfig.cols, gridRows, gridCols);
         } else {
-            // Dimensions are the same, pixel/spacing changed. 
+            // Dimensions are the same, pixel/spacing changed.
             // gridState should be oldGridData if it was passed correctly as a deep copy.
             // If updateGridConfiguration passes a deepCopy of current gridState as oldGridData,
             // and then updates globals, and THEN calls reinitialize, then gridState is already correct.
             // Let's ensure gridState IS the oldGridData if dimensions haven't changed.
-            gridState = oldGridData; 
+            gridState = oldGridData; // oldGridData is already a deep copy from the caller
         }
     }
 
@@ -1644,8 +1720,8 @@ function updateGridConfiguration() {
             spacing: spacing
         },
         // Also include palette and spacingColor for completeness if other history items do
-        pal: [...palette],
-        spacingColor: spacingColor 
+        pal: [...palette], // Make sure this is a copy if palette can be mutated
+        spacingColor: spacingColor
     });
     console.log(`State saved (Config Change). History size: ${history.length}`);
 
