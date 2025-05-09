@@ -1520,8 +1520,8 @@ function updateGridConfiguration() {
     const newGridCols = parseInt(document.getElementById('gridColsInput').value, 10);
 
     // --- Validation --- (existing validation logic)
-    if (isNaN(newPixelSize) || newPixelSize < 1 || newPixelSize > 10) { /*...*/ return; }
-    if (isNaN(newSpacingSize) || newSpacingSize < 0 || newSpacingSize > 3) { /*...*/ return; }
+    if (isNaN(newPixelSize) || newPixelSize < 1 || newPixelSize > 15) { /*...*/ return; }
+    if (isNaN(newSpacingSize) || newSpacingSize < 0 || newSpacingSize > 5) { /*...*/ return; }
     if (isNaN(newGridRows) || newGridRows < 10 || newGridRows > 500) { /*...*/ return; }
     if (isNaN(newGridCols) || newGridCols < 10 || newGridCols > 800) { /*...*/ return; }
     // --- End Validation ---
