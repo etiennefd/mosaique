@@ -258,7 +258,7 @@ function floodFill(startRow, startCol, fillColorIndex) {
 
     const queue = [[startRow, startCol]]; // Queue of [row, col] pairs
     let iterations = 0; // Safety break
-    const maxIterations = gridRows * gridCols * 3; // Generous limit
+    const maxIterations = gridRows * gridCols * 10; // Generous limit
 
     let pixelsChanged = 0;
 
