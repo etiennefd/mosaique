@@ -1327,32 +1327,70 @@ function setupOptionsPanel() {
              console.log(`Color selected via click: index ${index}`);
         });
         swatch.addEventListener('dblclick', (event) => {
-             const indexToEdit = index; // This will be 0-8
+             const indexToEdit = index; 
              activeColorPickerIndex = indexToEdit;
-             console.log(`Opening picker for palette index ${indexToEdit}, color ${palette[indexToEdit]}`);
+             
+             const paletteStateAtPickerOpen = [...palette]; // For history
+             const originalColorOfThisSwatch = palette[indexToEdit]; // For cancellation
+             let pickerWasFinalized = false;
+
+             console.log(`Opening picker for palette index ${indexToEdit}, color ${originalColorOfThisSwatch}`);
+             if (currentPickerInstance) { currentPickerInstance.destroy(); } // Destroy any existing picker
              currentPickerInstance = new Picker({
-                parent: swatch, popup: 'top', color: palette[indexToEdit],
+                parent: swatch, popup: 'top', color: originalColorOfThisSwatch,
                 alpha: false, editor: true, editorFormat: 'hex',
+                onChange: function(newColor) {
+                    const hexColor = newColor.hex.substring(0, 7);
+                    if (indexToEdit < 0 || indexToEdit >= 9) { return; } // Safety for 0-8 palette indices
+
+                    palette[indexToEdit] = hexColor;
+                    const editedSwatch = document.getElementById(`color-${indexToEdit}`);
+                    if (editedSwatch) {
+                         editedSwatch.style.backgroundColor = hexColor;
+                         editedSwatch.title = hexColor;
+                    }
+                    drawGrid(); // ADDED: Redraw grid live with new palette color
+                    // Future: if selectedColorIndex === indexToEdit, could update live previews of tools
+                },
                 onDone: function(newColor) {
-                     const hexColor = newColor.hex.substring(0, 7);
-                     if (indexToEdit < 0 || indexToEdit >= palette.length || indexToEdit >= 9) { return; } // Safety for 0-8
-                     const oldColor = palette[indexToEdit];
-                     if (oldColor === hexColor) { return; }
-                     if (history.length >= MAX_HISTORY) { history.shift(); }
-                     const paletteBeforeChange = [...palette];
-                     history.push({ grid: deepCopyGrid(gridState), pal: paletteBeforeChange, spacingColor: spacingColor }); 
-                     palette[indexToEdit] = hexColor;
+                     pickerWasFinalized = true;
+                     const finalHexColor = newColor.hex.substring(0, 7);
+                     if (indexToEdit < 0 || indexToEdit >= 9) { return; } 
+
+                     palette[indexToEdit] = finalHexColor; // Ensure final value is set
                      const editedSwatch = document.getElementById(`color-${indexToEdit}`);
                      if (editedSwatch) {
-                          editedSwatch.style.backgroundColor = hexColor;
-                          editedSwatch.title = hexColor;
+                          editedSwatch.style.backgroundColor = finalHexColor;
+                          editedSwatch.title = finalHexColor;
+                     }
+
+                     if (originalColorOfThisSwatch !== finalHexColor) {
+                         if (history.length >= MAX_HISTORY) { history.shift(); }
+                         history.push({ 
+                             grid: deepCopyGrid(gridState), 
+                             pal: paletteStateAtPickerOpen, // Use palette state from before picker
+                             spacingColor: spacingColor 
+                         }); 
+                         console.log(`State saved (Palette Change for index ${indexToEdit}). History size: ${history.length}`);
                      }
                      drawGrid(); 
-                     activeColorPickerIndex = -1;
                 },
                 onClose: function() { 
-                     console.log(`Picker closed (Palette Index ${indexToEdit}).`);
+                     if (!pickerWasFinalized) {
+                         // Picker was cancelled, revert palette change for this swatch
+                         palette[indexToEdit] = originalColorOfThisSwatch;
+                         const editedSwatch = document.getElementById(`color-${indexToEdit}`);
+                         if (editedSwatch) {
+                              editedSwatch.style.backgroundColor = originalColorOfThisSwatch;
+                              editedSwatch.title = originalColorOfThisSwatch;
+                         }
+                         drawGrid(); // ADDED: Redraw grid to revert live changes if cancelled
+                         // If this was the selected color, redraw might be needed if previews were live updated
+                         // For now, just reverting palette & swatch. drawGrid() onDone handles committed changes.
+                     }
+                     console.log(`Picker closed (Palette Index ${indexToEdit}). Finalized: ${pickerWasFinalized}`);
                      currentPickerInstance = null;
+                     activeColorPickerIndex = -1;
                 }
              });
              currentPickerInstance.show();
@@ -1365,27 +1403,53 @@ function setupOptionsPanel() {
         spacingSwatchElement.addEventListener('dblclick', (event) => {
             if (currentPickerInstance) { currentPickerInstance.destroy(); }
             activeColorPickerIndex = 9; // Special marker for spacing color picker
-            console.log(`Opening picker for Spacing Color, current: ${spacingColor}`);
+            
+            const originalSpacingColorValue = spacingColor; // For history and cancellation
+            let pickerWasFinalized = false;
+
+            console.log(`Opening picker for Spacing Color, current: ${originalSpacingColorValue}`);
             currentPickerInstance = new Picker({
                 parent: spacingSwatchElement,
                 popup: 'top',
-                color: spacingColor,
+                color: originalSpacingColorValue,
                 alpha: false, editor: true, editorFormat: 'hex',
-                onDone: function(newColor) {
+                onChange: function(newColor) {
                     const hexColor = newColor.hex.substring(0, 7);
-                    if (spacingColor === hexColor) { return; }
-                    if (history.length >= MAX_HISTORY) { history.shift(); }
-                    history.push({ grid: deepCopyGrid(gridState), pal: [...palette], spacingColor: spacingColor });
-                    console.log(`State saved (Spacing Color Change). History size: ${history.length}`);
                     spacingColor = hexColor;
                     spacingSwatchElement.style.backgroundColor = hexColor;
                     spacingSwatchElement.title = `Background/Spacing Color (${hexColor})`;
-                    drawGrid();
-                    activeColorPickerIndex = -1;
+                    drawGrid(); // Redraw grid live with new spacing color
+                },
+                onDone: function(newColor) {
+                    pickerWasFinalized = true;
+                    const finalHexColor = newColor.hex.substring(0, 7);
+                    
+                    spacingColor = finalHexColor; // Ensure final value
+                    spacingSwatchElement.style.backgroundColor = finalHexColor;
+                    spacingSwatchElement.title = `Background/Spacing Color (${finalHexColor})`;
+
+                    if (originalSpacingColorValue !== finalHexColor) {
+                        if (history.length >= MAX_HISTORY) { history.shift(); }
+                        history.push({ 
+                            grid: deepCopyGrid(gridState), 
+                            pal: [...palette], 
+                            spacingColor: originalSpacingColorValue // Save spacing color from before picker
+                        });
+                        console.log(`State saved (Spacing Color Change). History size: ${history.length}`);
+                    }
+                    drawGrid(); // Ensure final draw
                 },
                 onClose: function() {
-                     console.log("Picker closed (Spacing Color).");
+                     if (!pickerWasFinalized) {
+                         // Picker was cancelled, revert spacing color
+                         spacingColor = originalSpacingColorValue;
+                         spacingSwatchElement.style.backgroundColor = originalSpacingColorValue;
+                         spacingSwatchElement.title = `Background/Spacing Color (${originalSpacingColorValue})`;
+                         drawGrid(); // Redraw with original spacing color
+                     }
+                     console.log(`Picker closed (Spacing Color). Finalized: ${pickerWasFinalized}`);
                      currentPickerInstance = null;
+                     activeColorPickerIndex = -1;
                 }
             });
             currentPickerInstance.show();
