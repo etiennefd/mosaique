@@ -192,47 +192,166 @@ function clearPreviewCanvas() {
 
 // --- Interaction ---
 function getPixelCoords(event) {
-    const rect = canvas.getBoundingClientRect(); // rect of the large, scrollable canvas
-
-    // canvasX/Y are click coordinates relative to the top-left corner of the *entire logical canvas*
-    // This is because rect.left/top are the coordinates of the visible part of the canvas relative to the viewport,
-    // and event.clientX/Y are click coordinates relative to the viewport.
-    // The difference gives the click position from the top-left of the (potentially scrolled) canvas element.
+    const rect = canvas.getBoundingClientRect();
     const canvasX = event.clientX - rect.left;
     const canvasY = event.clientY - rect.top;
 
-    // Calculate row and column based on these logical canvas coordinates
+    // Calculate overall column and row index
     const col = Math.floor((canvasX - spacing) / (pixelSize + spacing));
     const row = Math.floor((canvasY - spacing) / (pixelSize + spacing));
 
     if (row >= 0 && row < gridRows && col >= 0 && col < gridCols) {
-        return { row, col };
+        let quadrant = null; // Default to null (solid fill or click on spacing/center line)
+
+        // pixelInternalX/Y are coordinates within the "pixel+spacing" block, from 0 up to pixelSize+spacing-1
+        const pixelInternalXInBlock = (canvasX - spacing) % (pixelSize + spacing);
+        const pixelInternalYInBlock = (canvasY - spacing) % (pixelSize + spacing);
+
+        // Only proceed with quadrant logic if click is ON THE PIXEL part of the block
+        if (pixelInternalXInBlock < pixelSize && pixelInternalYInBlock < pixelSize) {
+            const pixelInternalX = pixelInternalXInBlock; // Actual coordinate within the pixel (0 to pixelSize-1)
+            const pixelInternalY = pixelInternalYInBlock; // Actual coordinate within the pixel (0 to pixelSize-1)
+
+            if (pixelSize > 1) { // Only determine quadrant if pixel is larger than 1x1
+                const halfPixelSize = pixelSize / 2;
+                const isOddSize = pixelSize % 2 !== 0;
+
+                if (isOddSize) {
+                    const centerIndex = Math.floor(pixelSize / 2); // e.g., for size 3, center is 1 (0-indexed)
+                    if (pixelInternalX === centerIndex || pixelInternalY === centerIndex) {
+                        quadrant = null; // Click is on the center line/cross of an odd-sized pixel
+                    } else if (pixelInternalX < centerIndex && pixelInternalY < centerIndex) {
+                        quadrant = 'tl';
+                    } else if (pixelInternalX > centerIndex && pixelInternalY < centerIndex) {
+                        quadrant = 'tr';
+                    } else if (pixelInternalX < centerIndex && pixelInternalY > centerIndex) {
+                        quadrant = 'bl';
+                    } else if (pixelInternalX > centerIndex && pixelInternalY > centerIndex) {
+                        quadrant = 'br';
+                    }
+                } else { // Even size
+                    if (pixelInternalX < halfPixelSize && pixelInternalY < halfPixelSize) {
+                        quadrant = 'tl';
+                    } else if (pixelInternalX >= halfPixelSize && pixelInternalY < halfPixelSize) {
+                        quadrant = 'tr';
+                    } else if (pixelInternalX < halfPixelSize && pixelInternalY >= halfPixelSize) {
+                        quadrant = 'bl';
+                    } else if (pixelInternalX >= halfPixelSize && pixelInternalY >= halfPixelSize) {
+                        quadrant = 'br';
+                    }
+                }
+            }
+            // If pixelSize is 1, quadrant remains null (results in solid fill)
+        }
+        // If click was on spacing part of the block, quadrant also remains null
+
+        return { row, col, quadrant };
     }
-    return null; 
+    return null; // Click is outside the grid boundaries
 }
 
-function handlePixelChange(row, col, mode) {
+function handlePixelChange(row, col, mode, quadrant = null) { // Added quadrant, default to null
     const currentPixel = gridState[row][col];
-    let newMainColorIndex;
+    let newMainColorIndex; // To be assigned based on logic
+    // let newFillStyle = 'solid'; // Default, will be updated by logic
+    let changed = false;
 
-    if (mode === 'draw') {
-        newMainColorIndex = selectedColorIndex;
-    } else { // mode === 'erase'
-        newMainColorIndex = erasePixelColorIndex;
+    const targetColorIndex = (mode === 'draw') ? selectedColorIndex : erasePixelColorIndex;
+
+    if (currentTool === 'pencil' && isTriangleModeEnabled && pixelSize > 1 && quadrant && mode === 'draw') {
+        const targetTriangleStyle = `triangle-${quadrant}`; // e.g., 'triangle-tl'
+
+        if (currentPixel.fillStyle === 'solid') {
+            // If current is solid, change to triangle, unless it's already the target color (no visual change then for solidifying)
+            // This case is about dabbing a triangle onto a solid pixel.
+            if (currentPixel.mainColorIndex !== targetColorIndex || currentPixel.fillStyle !== targetTriangleStyle) {
+                 gridState[row][col] = {
+                    mainColorIndex: targetColorIndex,
+                    secondaryColorIndex: defaultPixelColorIndex, 
+                    fillStyle: targetTriangleStyle
+                };
+                changed = true;
+            }
+        } else if (currentPixel.fillStyle.startsWith('triangle-')) {
+            if (currentPixel.fillStyle === targetTriangleStyle) {
+                // Clicked same quadrant of an existing triangle
+                if (currentPixel.mainColorIndex !== targetColorIndex) {
+                    gridState[row][col].mainColorIndex = targetColorIndex; // Just change color
+                    changed = true;
+                }
+                // If color is already same, no change
+            } else {
+                // Clicked a different quadrant on an existing triangle pixel
+                // This solidifies the pixel with the new target color
+                gridState[row][col] = {
+                    mainColorIndex: targetColorIndex,
+                    secondaryColorIndex: defaultPixelColorIndex,
+                    fillStyle: 'solid'
+                };
+                changed = true;
+            }
+        } else { 
+            // Fallback: if fillStyle is unrecognized, treat as if dabbing a new triangle.
+            gridState[row][col] = {
+                mainColorIndex: targetColorIndex,
+                secondaryColorIndex: defaultPixelColorIndex,
+                fillStyle: targetTriangleStyle
+            };
+            changed = true;
+        }
+        // newFillStyle = gridState[row][col].fillStyle; // Capture the style for drawing
+        newMainColorIndex = gridState[row][col].mainColorIndex;
+
+    } else { // Not pencil in triangle mode, or quadrant is null (solidify), or erasing
+        newMainColorIndex = targetColorIndex;
+        // newFillStyle = 'solid'; // Ensure solid fill
+        if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== newMainColorIndex) {
+            gridState[row][col] = {
+                mainColorIndex: newMainColorIndex,
+                secondaryColorIndex: defaultPixelColorIndex,
+                fillStyle: 'solid'
+            };
+            changed = true;
+        }
     }
 
-    if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== newMainColorIndex) {
-        gridState[row][col] = {
-            mainColorIndex: newMainColorIndex,
-            secondaryColorIndex: defaultPixelColorIndex,
-            fillStyle: 'solid'
-        };
-        ctx.fillStyle = palette[newMainColorIndex];
+    if (changed) {
+        // Draw the single updated pixel immediately on the main canvas
         const logicalX = spacing + col * (pixelSize + spacing);
         const logicalY = spacing + row * (pixelSize + spacing);
 
-        // REMOVED visibility check based on screenX/Y. Draw directly.
+        // Clear the specific pixel's area with spacingColor first
+        ctx.fillStyle = spacingColor; 
         ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+
+        // Then draw the new pixel state
+        const pixelToDraw = gridState[row][col];
+        ctx.fillStyle = palette[pixelToDraw.mainColorIndex];
+        
+        if (pixelToDraw.fillStyle === 'solid') {
+            ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+        } else if (pixelToDraw.fillStyle.startsWith('triangle-')) {
+            ctx.beginPath();
+            if (pixelToDraw.fillStyle === 'triangle-tl') { // Top-left corner
+                ctx.moveTo(logicalX, logicalY); // Top-left
+                ctx.lineTo(logicalX + pixelSize, logicalY); // Top-right
+                ctx.lineTo(logicalX, logicalY + pixelSize); // Bottom-left
+            } else if (pixelToDraw.fillStyle === 'triangle-tr') { // Top-right corner
+                ctx.moveTo(logicalX, logicalY); // Top-left
+                ctx.lineTo(logicalX + pixelSize, logicalY); // Top-right
+                ctx.lineTo(logicalX + pixelSize, logicalY + pixelSize); // Bottom-right
+            } else if (pixelToDraw.fillStyle === 'triangle-bl') { // Bottom-left corner
+                ctx.moveTo(logicalX, logicalY); // Top-left
+                ctx.lineTo(logicalX, logicalY + pixelSize); // Bottom-left
+                ctx.lineTo(logicalX + pixelSize, logicalY + pixelSize); // Bottom-right
+            } else if (pixelToDraw.fillStyle === 'triangle-br') { // Bottom-right corner
+                ctx.moveTo(logicalX + pixelSize, logicalY); // Top-right
+                ctx.lineTo(logicalX + pixelSize, logicalY + pixelSize); // Bottom-right
+                ctx.lineTo(logicalX, logicalY + pixelSize); // Bottom-left
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
         return true;
     }
     return false;
@@ -254,7 +373,11 @@ function drawLineBetweenPixels(r1, c1, r2, c2, mode) {
 
     while (true) {
         // Apply change to the current pixel on the line
-        if (handlePixelChange(currentRow, currentCol, mode)) {
+        // When drawing lines (pencil drag or shift+click), always solidify if in triangle mode.
+        const quadrantForLinePixel = (currentTool === 'pencil' && isTriangleModeEnabled && pixelSize > 1) ? null : undefined;
+        // Pass null to handlePixelChange to force solid, or undefined if quadrant isn't relevant (e.g. other tools)
+        // The third argument to handlePixelChange is 'mode', the fourth is 'quadrant'
+        if (handlePixelChange(currentRow, currentCol, mode, quadrantForLinePixel)) {
              changed = true;
         }
 
@@ -694,18 +817,19 @@ canvas.addEventListener('mousedown', (event) => {
                 changeOccurred = true;
             }
             if (!changeOccurred && history.length > 0) { history.pop(); }
-            lastClickCoords = { row: coords.row, col: coords.col };
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // Store full coords
          } else {
             // Pencil Click/Drag Start
             isDragging = true;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
             currentDragMode = 'draw'; // Pencil always draws
-            if (handlePixelChange(coords.row, coords.col, currentDragMode)) {
+            // Pass the quadrant from coords to handlePixelChange for the initial dab
+            if (handlePixelChange(coords.row, coords.col, currentDragMode, coords.quadrant)) {
                  changeOccurred = true;
             }
-            lastPixelCoords = { row: coords.row, col: coords.col };
-            lastClickCoords = { row: coords.row, col: coords.col };
+            lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
         }
     } else if (currentTool === 'bucket') {
         isDrawingShape = false;
@@ -713,7 +837,7 @@ canvas.addEventListener('mousedown', (event) => {
         if (floodFill(coords.row, coords.col, selectedColorIndex)) {
             changeOccurred = true;
         }
-        lastClickCoords = { row: coords.row, col: coords.col };
+        lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
     } else if (['line', 'rectangle', 'circle'].includes(currentTool)) {
         isDrawingShape = true;
         isDragging = true; // Use isDragging to indicate shape drawing is active
@@ -721,7 +845,7 @@ canvas.addEventListener('mousedown', (event) => {
          if (history.length >= MAX_HISTORY) { history.shift(); }
          history.push(deepCopyGrid(gridState));
          console.log(`Starting shape: ${currentTool}`);
-         lastClickCoords = { row: coords.row, col: coords.col }; // Update last click
+         lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // Update last click
     } else if (currentTool === 'select') {
         if (selectionRect && isInsideRect(coords.row, coords.col, selectionRect)) {
             // --- Start Moving Selection --- 
@@ -749,12 +873,12 @@ canvas.addEventListener('mousedown', (event) => {
             console.log("Starting selection definition.");
             // --- End Start Defining --- 
         }
-        lastClickCoords = { row: coords.row, col: coords.col };
+        lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
     } else {
         console.warn(`Tool not implemented: ${currentTool}`);
         isDrawingShape = false;
         isDragging = false;
-        lastClickCoords = { row: coords.row, col: coords.col };
+        lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
     }
     // --- End Tool Specific Logic ---
 });
@@ -781,16 +905,21 @@ canvas.addEventListener('mousemove', (event) => {
         if (currentTool === 'pencil') {
             // --- Pencil Drag Logic --- 
              if (lastPixelCoords && (coords.row !== lastPixelCoords.row || coords.col !== lastPixelCoords.col)) {
+                // drawLineBetweenPixels will handle solidification for interpolated pixels if in triangle mode
                 if (drawLineBetweenPixels(lastPixelCoords.row, lastPixelCoords.col, row, col, currentDragMode)) {
                     changeOccurred = true;
                 }
-            } else if (!lastPixelCoords) {
-                 // Safety net if mousedown didn't set lastPixelCoords
-                 if (handlePixelChange(row, col, currentDragMode)){
+            } else if (!lastPixelCoords && coords) { 
+                 // This case is for when drag starts and lastPixelCoords hasn't been set by a previous mousemove event,
+                 // or if it's a "click-without-much-move" that registers as a mousemove.
+                 // Treat as a dab at the current quadrant.
+                 if (handlePixelChange(coords.row, coords.col, currentDragMode, coords.quadrant)){
                      changeOccurred = true;
                  }
             }
-            lastPixelCoords = { row: row, col: col };
+            if (coords) { // Update lastPixelCoords only if coords are valid
+                lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+            }
             // --- End Pencil Drag --- 
         } else if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
             // --- Shape Preview Logic --- 
