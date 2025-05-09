@@ -1217,7 +1217,7 @@ let currentPickerInstance = null; // Hold the current picker instance
 function setupOptionsPanel() {
     const toolButtons = document.querySelectorAll('.tool-options button');
     const colorSwatches = document.querySelectorAll('.color-options .color-swatch');
-    const applyGridChangesButton = document.getElementById('applyGridChangesButton'); // New
+    // const applyGridChangesButton = document.getElementById('applyGridChangesButton'); // REMOVING
 
     // Assign the actual function here
     updateSelectedSwatch = (newIndex) => {
@@ -1358,23 +1358,28 @@ function setupOptionsPanel() {
     updateSelectedSwatch(selectedColorIndex);
     updateSelectedTool(`tool-${currentTool}`); // Set initial tool UI
 
-    // Add event listener for the new button (New)
-    if (applyGridChangesButton) {
-        applyGridChangesButton.addEventListener('click', updateGridConfiguration);
-    } else {
-        console.warn("applyGridChangesButton not found. Grid configuration cannot be updated via UI.");
-    }
-
-    // Populate initial values for grid config inputs (New)
+    // Populate initial values and add direct listeners for grid config inputs
     const pixelSizeInput = document.getElementById('pixelSizeInput');
     const spacingInput = document.getElementById('spacingInput');
     const gridRowsInput = document.getElementById('gridRowsInput');
     const gridColsInput = document.getElementById('gridColsInput');
 
-    if (pixelSizeInput) pixelSizeInput.value = pixelSize;
-    if (spacingInput) spacingInput.value = spacing;
-    if (gridRowsInput) gridRowsInput.value = gridRows;
-    if (gridColsInput) gridColsInput.value = gridCols;
+    if (pixelSizeInput) {
+        pixelSizeInput.value = pixelSize;
+        pixelSizeInput.addEventListener('change', updateGridConfiguration);
+    }
+    if (spacingInput) {
+        spacingInput.value = spacing;
+        spacingInput.addEventListener('change', updateGridConfiguration);
+    }
+    if (gridRowsInput) {
+        gridRowsInput.value = gridRows;
+        gridRowsInput.addEventListener('change', updateGridConfiguration);
+    }
+    if (gridColsInput) {
+        gridColsInput.value = gridCols;
+        gridColsInput.addEventListener('change', updateGridConfiguration);
+    }
 
     // Add scroll listener to the canvas container for redraws
     if (!canvasContainer) { // Ensure canvasContainer is available
