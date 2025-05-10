@@ -831,9 +831,9 @@ function drawPreviewShape(r1, c1, r2, c2, tool) {
     if (!canvasContainer) return;
     previewCtx.fillStyle = palette[selectedColorIndex];
     let pixelsToPreview = [];
-    if (tool === 'line') pixelsToPreview = getLinePixels(r1, c1, r2, c2);
-    else if (tool === 'rectangle') pixelsToPreview = getRectanglePixels(r1, c1, r2, c2);
-    else if (tool === 'circle') pixelsToPreview = getCirclePixels(r1, c1, r2, c2);
+    if (tool === 'tool-line') pixelsToPreview = getLinePixels(r1, c1, r2, c2);
+    else if (tool === 'tool-rectangle') pixelsToPreview = getRectanglePixels(r1, c1, r2, c2);
+    else if (tool === 'tool-circle') pixelsToPreview = getCirclePixels(r1, c1, r2, c2);
 
     const viewScrollX = canvasContainer.scrollLeft;
     const viewScrollY = canvasContainer.scrollTop;
@@ -1828,23 +1828,9 @@ function setupOptionsPanel() {
             clearPreviewCanvas();
             
             // Redraw active previews based on current state
-            // This logic is similar to what was in mousemove for panning previews
-            const currentMouseLogicalCoords = null; // We don't have mouse event here, so preview based on defined shapes
-
-            if (isDrawingShape && shapeStartX !== null && shapeStartY !== null && lastPixelCoords) {
-                // For shapes, the preview is often defined by start and current mouse (lastPixelCoords)
-                drawPreviewShape(shapeStartY, shapeStartX, lastPixelCoords.row, lastPixelCoords.col, currentTool);
-            } else if (isDefiningSelection && shapeStartX !== null && shapeStartY !== null && lastPixelCoords) {
-                drawPreviewSelection(shapeStartY, shapeStartX, lastPixelCoords.row, lastPixelCoords.col);
-            } else if (isMovingSelection && selectionBuffer && moveOffset && selectionRect && lastPixelCoords) {
-                const newTopLeftRow = lastPixelCoords.row - moveOffset.dr;
-                const newTopLeftCol = lastPixelCoords.col - moveOffset.dc;
-                // eraseAreaOnPreview(selectionRect); // Erasing old might not be needed if clearing full preview
-                drawBufferOnPreview(newTopLeftRow, newTopLeftCol);
-                const r2 = newTopLeftRow + selectionBuffer.height - 1;
-                const c2 = newTopLeftCol + selectionBuffer.width - 1;
-                drawPreviewSelection(newTopLeftRow, newTopLeftCol, r2, c2);
-            } else if (selectionRect && !isDefiningSelection && !isMovingSelection) {
+            // Mousemove handler is responsible for previews during active drawing/selection.
+            // Only redraw static selectionRect here if no active operation is occurring.
+            if (selectionRect && !isDrawingShape && !isDefiningSelection && !isMovingSelection) {
                  drawPreviewSelection(selectionRect.r1, selectionRect.c1, selectionRect.r2, selectionRect.c2);
             }
         });
