@@ -217,18 +217,24 @@ function getPixelCoords(event) {
 
                 if (isOddSize) {
                     const centerIndex = Math.floor(pixelSize / 2); // e.g., for size 3, center is 1 (0-indexed)
-                    if (pixelInternalX === centerIndex || pixelInternalY === centerIndex) {
-                        quadrant = null; // Click is on the center line/cross of an odd-sized pixel
-                    } else if (pixelInternalX < centerIndex && pixelInternalY < centerIndex) {
-                        quadrant = 'tl';
-                    } else if (pixelInternalX > centerIndex && pixelInternalY < centerIndex) {
-                        quadrant = 'tr';
-                    } else if (pixelInternalX < centerIndex && pixelInternalY > centerIndex) {
-                        quadrant = 'bl';
-                    } else if (pixelInternalX > centerIndex && pixelInternalY > centerIndex) {
-                        quadrant = 'br';
+                    
+                    // Tie-breaking logic for Half-Pixel tool when on center lines of odd-sized pixels
+                    const xIsOnCenterLine = Math.abs(pixelInternalX - centerIndex) < 0.00001; // Using a small epsilon
+                    const yIsOnCenterLine = Math.abs(pixelInternalY - centerIndex) < 0.00001;
+
+                    if (xIsOnCenterLine && yIsOnCenterLine) { // Exact center
+                        quadrant = 'tl'; // Tie-break to top-left
+                    } else if (xIsOnCenterLine) { // On vertical center line
+                        quadrant = (pixelInternalY < centerIndex) ? 'tl' : 'bl'; // Tie-break to left
+                    } else if (yIsOnCenterLine) { // On horizontal center line
+                        quadrant = (pixelInternalX < centerIndex) ? 'tl' : 'tr'; // Tie-break to top
+                    } else { // Not on a center line, standard quadrant determination
+                        if (pixelInternalX < centerIndex && pixelInternalY < centerIndex) quadrant = 'tl';
+                        else if (pixelInternalX > centerIndex && pixelInternalY < centerIndex) quadrant = 'tr';
+                        else if (pixelInternalX < centerIndex && pixelInternalY > centerIndex) quadrant = 'bl';
+                        else if (pixelInternalX > centerIndex && pixelInternalY > centerIndex) quadrant = 'br';
                     }
-                } else { // Even size
+                } else { // Even size (no center line issue for tie-breaking, standard logic)
                     if (pixelInternalX < halfPixelSize && pixelInternalY < halfPixelSize) {
                         quadrant = 'tl';
                     } else if (pixelInternalX >= halfPixelSize && pixelInternalY < halfPixelSize) {
@@ -254,49 +260,53 @@ function handlePixelChange(row, col, mode, quadrant = null) { // Quadrant is sti
     let changed = false;
     const targetColorIndex = (mode === 'draw') ? selectedColorIndex : erasePixelColorIndex;
 
-    // This function will be expanded for the Half-pixel tool.
+    // Revised logic: This function will be expanded for the Half-pixel tool.
     // For now, it primarily handles solid fills. Pencil tool will always pass quadrant = null.
     // Tools (bucket, shapes) don't use quadrant and will result in solid.
 
     // Default to solid fill for all tools unless specific Half-pixel logic (to be added) applies.
     if (currentTool === 'tool-halfpixel' && quadrant && mode === 'draw') {
-        // Placeholder: Half-pixel tool specific logic will go here.
-        // For now, it falls through to solid behavior.
-        // To make it actually do something for halfpixel (example, not final):
-        /*
-        const targetTriangleStyle = `triangle-${quadrant}`;
-        let newSecondaryColor = currentPixel.secondaryColorIndex;
-        if (currentPixel.fillStyle === 'solid') {
-            newSecondaryColor = currentPixel.mainColorIndex;
-        }
-        if (currentPixel.fillStyle !== targetTriangleStyle || currentPixel.mainColorIndex !== targetColorIndex) {
-            gridState[row][col] = {
-                mainColorIndex: targetColorIndex,
-                secondaryColorIndex: newSecondaryColor,
-                fillStyle: targetTriangleStyle
-            };
-            changed = true;
-        }
-        */
-        // TEMPORARY: For now, Half-pixel tool also makes solid pixels until fully implemented.
-        if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== targetColorIndex) {
-            gridState[row][col] = {
-                mainColorIndex: targetColorIndex,
-                secondaryColorIndex: (currentPixel.fillStyle === 'solid' && currentPixel.mainColorIndex !== targetColorIndex) 
-                                     ? currentPixel.mainColorIndex 
-                                     : (currentPixel.fillStyle.startsWith('triangle-') ? currentPixel.secondaryColorIndex : defaultPixelColorIndex),
-                fillStyle: 'solid'
-            };
-            changed = true;
-        }
+        const targetFillStyle = `triangle-${quadrant}`;
+        const targetMainColor = selectedColorIndex; // Half-pixel tool always uses selected color for its main part
+        let newSecondaryColor = defaultPixelColorIndex; // Default secondary
 
-    } else { // This case covers Pencil (quadrant = null), Bucket, Shapes, and default for Half-pixel for now.
-        if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== targetColorIndex) {
+        if (currentPixel.fillStyle === 'solid') {
+            if (currentPixel.mainColorIndex === targetMainColor) {
+                // Pixel is already solid with the target color, no effect.
+                return false; 
+            }
+            newSecondaryColor = currentPixel.mainColorIndex; // Original solid color becomes secondary
+        } else if (currentPixel.fillStyle.startsWith('triangle-')) {
+            // If it's already a triangle, the existing main color becomes the new secondary color.
+            // This handles changing the quadrant or color of an existing triangle.
+            newSecondaryColor = currentPixel.mainColorIndex;
+            // If applying the same triangle type and color, no change needed.
+            if (currentPixel.fillStyle === targetFillStyle && currentPixel.mainColorIndex === targetMainColor) {
+                return false;
+            }
+        } 
+        // Else (unknown state), newSecondaryColor remains defaultPixelColorIndex.
+
+        gridState[row][col] = {
+            mainColorIndex: targetMainColor,
+            secondaryColorIndex: newSecondaryColor,
+            fillStyle: targetFillStyle
+        };
+        changed = true;
+
+    } else { // This case covers Pencil (quadrant = null), Bucket, Shapes, Erase for Half-pixel, etc.
+        const effectiveTargetColor = (currentTool === 'tool-halfpixel' && mode === 'erase') 
+                                      ? erasePixelColorIndex 
+                                      : targetColorIndex;
+        let oldMainColor = currentPixel.mainColorIndex;
+        let oldFillStyle = currentPixel.fillStyle;
+
+        if (oldFillStyle !== 'solid' || oldMainColor !== effectiveTargetColor) {
             gridState[row][col] = {
-                mainColorIndex: targetColorIndex,
-                secondaryColorIndex: (currentPixel.fillStyle === 'solid' && currentPixel.mainColorIndex !== targetColorIndex) 
-                                     ? currentPixel.mainColorIndex 
-                                     : (currentPixel.fillStyle.startsWith('triangle-') ? currentPixel.secondaryColorIndex : defaultPixelColorIndex),
+                mainColorIndex: effectiveTargetColor,
+                secondaryColorIndex: (oldFillStyle === 'solid' && oldMainColor !== effectiveTargetColor) 
+                                     ? oldMainColor 
+                                     : (oldFillStyle.startsWith('triangle-') ? currentPixel.secondaryColorIndex : defaultPixelColorIndex),
                 fillStyle: 'solid'
             };
             changed = true;
@@ -755,52 +765,31 @@ function drawPreviewShape(r1, c1, r2, c2, tool) {
 let changeOccurred = false;
 
 canvas.addEventListener('mousedown', (event) => {
-    // --- Panning logic (REMOVING) ---
-    /*
-    if (isPanModeActive && canvasContainer) {
-        isPanning = true;
-        panStart.x = event.clientX;
-        panStart.y = event.clientY;
-        scrollStart.x = canvasContainer.scrollLeft;
-        scrollStart.y = canvasContainer.scrollTop;
-        canvas.style.cursor = 'grabbing';
-        event.preventDefault(); 
-        return; 
-    }
-    */
-    // --- End Panning logic ---
-
     const coords = getPixelCoords(event); 
     changeOccurred = false;
     lastPixelCoords = null;
     if (!coords && !isDrawingShape && !isDefiningSelection && !isMovingSelection) {
-         // If click is outside grid and not starting a shape/selection from outside,
-         // it might be an unintentional click, do nothing beyond what pan handled.
-         // This also prevents errors if coords is null later when a tool expects it.
         return;
     }
 
-    // Ensure shapeStartX/Y are set if coords are valid, even if tool isn't shape-based initially
-    // This helps if a tool switch happens or for lastClickCoords consistency.
     if (coords) {
-        shapeStartX = coords.col; // Store as grid col/row
-        shapeStartY = coords.row; // Store as grid col/row
+        shapeStartX = coords.col;
+        shapeStartY = coords.row;
     } else {
-        // For operations like selection start that might be outside, allow, but shapeStartX/Y might be null
         shapeStartX = null;
         shapeStartY = null;
     }
 
     isDrawingShape = false;
     isDefiningSelection = false;
-    isMovingSelection = false; // Reset move flag
+    isMovingSelection = false; 
 
     // --- Tool Specific Logic ---
-    if (currentTool === 'pencil') {
-         isDrawingShape = false; // Pencil doesn't draw shapes
-         // ... (existing pencil logic: shift+click and drag start)
-         // ... (ensure history is saved here for pencil actions) ...
-         if (shiftKeyPressed && lastClickCoords && coords) { // Pencil Shift+Click Line
+    if (currentTool === 'tool-pencil') {
+        isDrawingShape = false; // Pencil doesn't draw shapes
+        // ... (existing pencil logic: shift+click and drag start)
+        // ... (ensure history is saved here for pencil actions) ...
+        if (shiftKeyPressed && lastClickCoords && coords) { // Pencil Shift+Click Line
             isDragging = false;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
@@ -810,27 +799,41 @@ canvas.addEventListener('mousedown', (event) => {
             }
             if (!changeOccurred && history.length > 0) { history.pop(); }
             lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // Still store full coords for other tools
-         } else if (coords) { // Pencil Click/Drag Start
+        } else if (coords) { // Pencil Click/Drag Start
             isDragging = true;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
             currentDragMode = 'draw';
             // Pencil tool mousedown passes null for quadrant to ensure solid pixel via handlePixelChange.
             if (handlePixelChange(coords.row, coords.col, currentDragMode, null )) {
-                 changeOccurred = true;
+                changeOccurred = true;
             }
             // Store full coords for other tools that might use lastPixelCoords/lastClickCoords with quadrant.
             lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
             lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
         }
-    } else if (currentTool === 'bucket') {
+    } else if (currentTool === 'tool-bucket') {
         isDrawingShape = false;
         isDragging = false;
         if (floodFill(coords.row, coords.col, selectedColorIndex)) {
             changeOccurred = true;
         }
         lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
-    } else if (['line', 'rectangle', 'circle'].includes(currentTool)) {
+    } else if (currentTool === 'tool-halfpixel') {
+        if (coords && coords.quadrant) { 
+            isDragging = true; 
+            currentDragMode = 'draw'; 
+            if (history.length >= MAX_HISTORY) { history.shift(); }
+            history.push(deepCopyGrid(gridState));
+            if (handlePixelChange(coords.row, coords.col, currentDragMode, coords.quadrant)) {
+                changeOccurred = true; 
+            }
+            lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
+        } else {
+            isDragging = false; 
+        }
+    } else if (['tool-line', 'tool-rectangle', 'tool-circle'].includes(currentTool)) {
         isDrawingShape = true;
         isDragging = true; // Use isDragging to indicate shape drawing is active
          // Save state *before* shape drawing starts
@@ -838,7 +841,7 @@ canvas.addEventListener('mousedown', (event) => {
          history.push(deepCopyGrid(gridState));
          console.log(`Starting shape: ${currentTool}`);
          lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // Update last click
-    } else if (currentTool === 'select') {
+    } else if (currentTool === 'tool-select') {
         if (selectionRect && isInsideRect(coords.row, coords.col, selectionRect)) {
             // --- Start Moving Selection --- 
             isMovingSelection = true;
@@ -867,34 +870,25 @@ canvas.addEventListener('mousedown', (event) => {
         }
         lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
     } else {
-        console.warn(`Tool not implemented: ${currentTool}`);
+        console.warn(`Mousedown: Tool not implemented or unrecognized: ${currentTool}`);
         isDrawingShape = false;
         isDragging = false;
-        lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+        if(coords) { // Set lastClickCoords even for unimplemented tools if coords exist
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+        } else {
+            lastClickCoords = null;
+        }
     }
     // --- End Tool Specific Logic ---
 });
 
 canvas.addEventListener('mousemove', (event) => {
-    // --- Panning logic (REMOVING) ---
-    /*
-    if (isPanning && canvasContainer) {
-        const dx = event.clientX - panStart.x;
-        const dy = event.clientY - panStart.y;
-        canvasContainer.scrollLeft = scrollStart.x - dx;
-        canvasContainer.scrollTop = scrollStart.y - dy;
-        event.preventDefault();
-        return;
-    }
-    */
-    // --- End Panning logic ---
-
     if (isDragging) {
         const coords = getPixelCoords(event);
         if (!coords) return;
         const { row, col, quadrant } = coords; // Destructure here for broader availability
 
-        if (currentTool === 'pencil') {
+        if (currentTool === 'tool-pencil') {
             // const { row, col, quadrant } = coords; // No longer needed here, already destructured
             const lastRow = lastPixelCoords.row;
             const lastCol = lastPixelCoords.col;
@@ -925,19 +919,19 @@ canvas.addEventListener('mousemove', (event) => {
             // Update lastPixelCoords for the next mousemove event, regardless of what happened above.
             lastPixelCoords = { row, col, quadrant };
             // Note: changeOccurred is managed by handlePixelChange/drawLineBetweenPixels
-        } else if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
+        } else if (isDrawingShape && ['tool-line', 'tool-rectangle', 'tool-circle'].includes(currentTool)) {
             // --- Shape Preview Logic --- 
             clearPreviewCanvas(); // Clear before drawing shape preview
             // Now row and col from the destructured coords are available
             drawPreviewShape(shapeStartY, shapeStartX, row, col, currentTool);
              // lastPixelCoords is not needed here, we use shapeStartX/Y and current coords
             // --- End Shape Preview --- 
-        } else if (isDefiningSelection && currentTool === 'select') {
+        } else if (isDefiningSelection && currentTool === 'tool-select') {
             // --- Selection Preview --- 
             clearPreviewCanvas(); // <<<< ADD THIS LINE BACK HERE
             drawPreviewSelection(shapeStartY, shapeStartX, row, col);
             // --- End Selection Preview --- 
-        } else if (isMovingSelection && currentTool === 'select') {
+        } else if (isMovingSelection && currentTool === 'tool-select') {
              // --- Selection Move Preview --- 
              if (selectionBuffer && moveOffset && selectionRect) { // Ensure selectionRect exists
                 const newTopLeftRow = row - moveOffset.dr;
@@ -956,37 +950,45 @@ canvas.addEventListener('mousemove', (event) => {
                 drawPreviewSelection(newTopLeftRow, newTopLeftCol, r2, c2);
              }
              // --- End Move Preview --- 
+        } else if (currentTool === 'tool-halfpixel') {
+            if (coords && coords.quadrant) { // Ensure new coords and quadrant are valid
+                // Only act if pixel or quadrant changes. Half-pixel tool affects one pixel at a time.
+                if (coords.row !== lastPixelCoords.row || 
+                    coords.col !== lastPixelCoords.col || 
+                    coords.quadrant !== lastPixelCoords.quadrant) {
+                    
+                    // Call handlePixelChange for the new pixel/quadrant.
+                    // History was pushed on mousedown. Each step modifies that state.
+                    if (handlePixelChange(coords.row, coords.col, 'draw', coords.quadrant)) {
+                        changeOccurred = true; // A change was made in this step
+                    } else {
+                        // Even if this specific step didn't change the pixel (e.g. target same as current state for this new pixel/quadrant),
+                        // if an earlier step in this drag sequence *did* make a change, we want to keep changeOccurred true.
+                        // changeOccurred remains as it was if this step made no change.
+                    }
+                }
+                lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+            }
         }
     }
 });
 
 canvas.addEventListener('mouseup', (event) => {
-    // --- Panning logic (REMOVING) ---
-    /*
-    if (isPanning) {
-        isPanning = false;
-        canvas.style.cursor = isPanModeActive ? 'grab' : determineCursorForCurrentTool();
-        event.preventDefault();
-        return;
-    }
-    */
-    // --- End Panning logic ---
-
     if (isDragging) {
         let finalizeAction = false;
         let actionMadeChange = false; // Track if the finalized action modified gridState
 
-        if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
+        if (isDrawingShape && ['tool-line', 'tool-rectangle', 'tool-circle'].includes(currentTool)) {
             // --- Finalize Shape Drawing --- 
             const coords = getPixelCoords(event); // Need end coords from event
             if (coords && shapeStartX !== null && shapeStartY !== null) {
                  const { row, col } = coords;
                  let pixels = [];
-                 if (currentTool === 'line') {
+                 if (currentTool === 'tool-line') {
                     pixels = getLinePixels(shapeStartY, shapeStartX, row, col);
-                 } else if (currentTool === 'rectangle') {
+                 } else if (currentTool === 'tool-rectangle') {
                     pixels = getRectanglePixels(shapeStartY, shapeStartX, row, col);
-                 } else if (currentTool === 'circle') {
+                 } else if (currentTool === 'tool-circle') {
                     pixels = getCirclePixels(shapeStartY, shapeStartX, row, col);
                  }
 
@@ -1003,7 +1005,7 @@ canvas.addEventListener('mouseup', (event) => {
             // --- End Finalize Shape --- 
              actionMadeChange = changeOccurred;
              finalizeAction = true; // A shape was potentially drawn
-        } else if (isDefiningSelection && currentTool === 'select') {
+        } else if (isDefiningSelection && currentTool === 'tool-select') {
             // --- Finalize Selection --- 
             const coords = getPixelCoords(event);
             if (coords && shapeStartX !== null && shapeStartY !== null) {
@@ -1033,7 +1035,7 @@ canvas.addEventListener('mouseup', (event) => {
             }
             finalizeAction = true; // Selection action attempted
              // --- End Finalize Selection --- 
-        } else if (isMovingSelection && currentTool === 'select') {
+        } else if (isMovingSelection && currentTool === 'tool-select') {
             // --- Finalize Selection Move --- 
             clearPreviewCanvas();
             const coords = getPixelCoords(event);
@@ -1065,13 +1067,18 @@ canvas.addEventListener('mouseup', (event) => {
             }
             finalizeAction = true;
             // --- End Finalize Move --- 
-        } else if (currentTool === 'pencil') {
+        } else if (currentTool === 'tool-pencil') {
             actionMadeChange = changeOccurred;
             finalizeAction = true;
-        } else if (currentTool === 'bucket') {
+        } else if (currentTool === 'tool-bucket') {
             // Bucket finalize logic might need checking if floodFill returned true
              actionMadeChange = changeOccurred; // Assuming changeOccurred was set by floodFill
              finalizeAction = true;
+        } else if (currentTool === 'tool-halfpixel') {
+            // For half-pixel, the action is considered finalized if dragging occurred.
+            // changeOccurred reflects if any pixel state actually changed during the mousedown/drag sequence.
+            actionMadeChange = changeOccurred;
+            finalizeAction = true; // A half-pixel interaction was attempted.
         }
 
         // --- General Drag/Shape/Selection End Cleanup --- 
@@ -1099,15 +1106,6 @@ canvas.addEventListener('mouseup', (event) => {
 });
 
 canvas.addEventListener('mouseleave', (event) => {
-    // --- Panning logic (REMOVING) ---
-    /*
-    if (isPanning) {
-        isPanning = false;
-        canvas.style.cursor = isPanModeActive ? 'grab' : determineCursorForCurrentTool();
-    }
-    */
-    // --- End Panning logic ---
-
     clearPreviewCanvas();
     if (isDragging) { // This is for tool drags, not panning drag
         if (isMovingSelection) {
@@ -1275,7 +1273,7 @@ document.addEventListener('keydown', (event) => {
     const isCut = (event.metaKey || event.ctrlKey) && event.key === 'x';
     const isPaste = (event.metaKey || event.ctrlKey) && event.key === 'v';
 
-    if (isCopy && currentTool === 'select' && selectionRect) {
+    if (isCopy && currentTool === 'tool-select' && selectionRect) {
         event.preventDefault();
         if (copySelectionToBuffer()) {
             console.log("Selection copied to buffer.");
@@ -1285,7 +1283,7 @@ document.addEventListener('keydown', (event) => {
         // Copy doesn't modify grid, no history push, no return needed unless we want to block other actions
     }
 
-    if (isCut && currentTool === 'select' && selectionRect) {
+    if (isCut && currentTool === 'tool-select' && selectionRect) {
         event.preventDefault();
         // Save state *before* cut
         if (history.length >= MAX_HISTORY) { history.shift(); }
@@ -1473,12 +1471,12 @@ window.addEventListener('blur', () => {
 
 // Function to determine appropriate cursor (KEEPING)
 function determineCursorForCurrentTool() {
-    if (currentTool === 'pencil' || currentTool === 'line' || currentTool === 'rectangle' || currentTool === 'circle') {
+    if (currentTool === 'tool-pencil' || currentTool === 'tool-line' || currentTool === 'tool-rectangle' || currentTool === 'tool-circle') { // UPDATED
         return 'crosshair';
     }
     // Add other tools if they need specific cursors, e.g.:
-    // if (currentTool === 'bucket') return 'url(bucket.cur), default'; 
-    // if (currentTool === 'select') return 'default'; // Or 'move' if over selection
+    // if (currentTool === 'tool-bucket') return 'url(bucket.cur), default'; 
+    // if (currentTool === 'tool-select') return 'default'; // Or 'move' if over selection
     return 'default'; // Default cursor
 }
 
@@ -1525,7 +1523,7 @@ function setupOptionsPanel() {
         if (selectedButton) {
             selectedButton.classList.add('selected');
         }
-        currentTool = newToolId.replace('tool-', ''); // Extract tool name
+        currentTool = newToolId; // Store the full ID, don't replace 'tool-'
         console.log(`Tool selected: ${currentTool}`);
 
         // Show/hide pencil-specific options
