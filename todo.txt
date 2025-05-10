@@ -1,0 +1,1 @@
+- make clicking on the spacing color the closest pixel

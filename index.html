@@ -157,6 +157,7 @@
         <div class="panel-section tool-options">
             <h4>Tools</h4>
             <button id="tool-pencil" title="Pencil (B/P)">✏️/B</button>
+            <button id="tool-halfpixel" title="Half-pixel Tool (T)">✏️📐/T</button>
             <button id="tool-bucket" title="Paint Bucket (G)">🪣/G</button>
             <button id="tool-line" title="Line (L)">📏/L</button>
             <button id="tool-rectangle" title="Rectangle (R)">⬜/R</button>
@@ -177,11 +178,18 @@
                  <div class="color-swatch" id="color-8" style="background-color: #E0E0E0;" title="Pale Gray"></div>
              </div>
         </div>
+        <div class="panel-section" id="tool-specific-options-panel" style="display: none;">
+            <h4>Tool Options</h4>
+            <div id="pencil-options" style="display: none;">
+                <!-- Triangle mode checkbox and label are REMOVED from here -->
+            </div>
+            <!-- Other tool-specific options can be added here -->
+        </div>
         <div class="panel-section grid-config-options">
             <h4>Grid Configuration</h4>
             <div>
                 <label for="pixelSizeInput">Pixel Size (1-15):</label>
-                <input type="number" id="pixelSizeInput" min="1" max="15" value="5">
+                <input type="number" id="pixelSizeInput" min="1" max="15" value="15">
             </div>
             <div>
                 <label for="spacingInput">Spacing (0-5):</label>
