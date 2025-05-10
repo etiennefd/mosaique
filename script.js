@@ -908,27 +908,40 @@ canvas.addEventListener('mousemove', (event) => {
     if (isDragging) {
         const coords = getPixelCoords(event);
         if (!coords) return;
-        const { row, col } = coords;
+        // const { row, col } = coords; // Destructure later if needed by specific tool logic
 
         if (currentTool === 'pencil') {
-            // --- Pencil Drag Logic --- 
-             if (lastPixelCoords && (coords.row !== lastPixelCoords.row || coords.col !== lastPixelCoords.col)) {
+            // lastPixelCoords is guaranteed to be set by mousedown if isDragging is true for pencil.
+            const { row, col, quadrant } = coords;
+            const lastRow = lastPixelCoords.row;
+            const lastCol = lastPixelCoords.col;
+            // const lastQuadrant = lastPixelCoords.quadrant; // Used in comparison below
+
+            if (row !== lastRow || col !== lastCol) {
+                // --- Moved to a DIFFERENT pixel cell ---
                 // drawLineBetweenPixels will handle solidification for interpolated pixels if in triangle mode
-                if (drawLineBetweenPixels(lastPixelCoords.row, lastPixelCoords.col, row, col, currentDragMode)) {
+                if (drawLineBetweenPixels(lastRow, lastCol, row, col, currentDragMode)) {
                     changeOccurred = true;
                 }
-            } else if (!lastPixelCoords && coords) { 
-                 // This case is for when drag starts and lastPixelCoords hasn't been set by a previous mousemove event,
-                 // or if it's a "click-without-much-move" that registers as a mousemove.
-                 // Treat as a dab at the current quadrant.
-                 if (handlePixelChange(coords.row, coords.col, currentDragMode, coords.quadrant)){
-                     changeOccurred = true;
-                 }
+            } else {
+                // --- Still within the SAME pixel cell (row === lastRow && col === lastCol) ---
+                if (quadrant && lastPixelCoords.quadrant && quadrant !== lastPixelCoords.quadrant) {
+                    // Moved to a different quadrant within the same pixel.
+                    const currentPixelState = gridState[row][col];
+                    if (currentPixelState && currentPixelState.fillStyle.startsWith('triangle-')) {
+                        // And it was a triangle. Solidify it.
+                        if (handlePixelChange(row, col, currentDragMode, null /* force solid */)) {
+                            changeOccurred = true;
+                        }
+                    }
+                    // If it's already solid, or if the new quadrant is null (e.g. center line),
+                    // or if the old quadrant was null, or if quadrants are the same, do nothing more here.
+                    // The initial dab or line drawing would have handled it.
+                }
             }
-            if (coords) { // Update lastPixelCoords only if coords are valid
-                lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
-            }
-            // --- End Pencil Drag --- 
+            // Update lastPixelCoords for the next mousemove event, regardless of what happened above.
+            lastPixelCoords = { row, col, quadrant };
+            // Note: changeOccurred is managed by handlePixelChange/drawLineBetweenPixels
         } else if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
             // --- Shape Preview Logic --- 
             clearPreviewCanvas(); // Clear before drawing shape preview
