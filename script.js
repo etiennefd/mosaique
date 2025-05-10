@@ -233,13 +233,26 @@ function clearPreviewCanvas() {
 
 // --- Interaction ---
 function getPixelCoords(event) {
-    const rect = canvas.getBoundingClientRect();
+    const rect = canvas.getBoundingClientRect(); // rect of the large, scrollable canvas
+
+    // canvasX/Y are click coordinates relative to the top-left corner of the *entire logical canvas*
+    // This is because rect.left/top are the coordinates of the visible part of the canvas relative to the viewport,
+    // and event.clientX/Y are click coordinates relative to the viewport.
+    // The difference gives the click position from the top-left of the (potentially scrolled) canvas element.
     const canvasX = event.clientX - rect.left;
     const canvasY = event.clientY - rect.top;
 
-    // Calculate overall column and row index
-    const col = Math.floor((canvasX - spacing) / (pixelSize + spacing));
-    const row = Math.floor((canvasY - spacing) / (pixelSize + spacing));
+    // Calculate column, snapping clicks in initial leading spacing to column 0
+    let col = Math.floor((canvasX - spacing) / (pixelSize + spacing));
+    if (spacing > 0 && canvasX >= 0 && canvasX < spacing && col === -1) {
+        col = 0;
+    }
+
+    // Calculate row, snapping clicks in initial leading spacing to row 0
+    let row = Math.floor((canvasY - spacing) / (pixelSize + spacing));
+    if (spacing > 0 && canvasY >= 0 && canvasY < spacing && row === -1) {
+        row = 0;
+    }
 
     if (row >= 0 && row < gridRows && col >= 0 && col < gridCols) {
         let quadrant = null; // Default to null (solid fill or click on spacing/center line)
@@ -1507,20 +1520,6 @@ document.addEventListener('keydown', (event) => {
     }
     // --- End Color Selection Shortcuts ---
 
-    // --- Pan Mode Activation (Spacebar) --- (REMOVING)
-    /*
-    if (event.key === ' ' && !isPanModeActive) {
-        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || currentPickerInstance) {
-            return; 
-        }
-        event.preventDefault(); 
-        isPanModeActive = true;
-        canvas.style.cursor = 'grab';
-        return; 
-    }
-    */
-    // --- End Pan Mode Activation ---
-
     // --- Shift Key State ---
     if (event.key === 'Shift') {
         shiftKeyPressed = true;
@@ -1534,29 +1533,10 @@ document.addEventListener('keyup', (event) => {
         shiftKeyPressed = false;
     }
     // --- End Shift Key State ---
-
-    // --- Pan Mode Deactivation (Spacebar) --- (REMOVING)
-    /*
-    if (event.key === ' ') {
-        if (isPanModeActive) {
-            event.preventDefault();
-            isPanModeActive = false;
-            if (!isPanning) { 
-                canvas.style.cursor = determineCursorForCurrentTool();
-            } else {
-                // If still panning (mouse button is down), cursor remains 'grabbing' until mouseup
-                canvas.style.cursor = 'grabbing'; 
-            }
-        }
-    }
-    */
-    // --- End Pan Mode Deactivation ---
 });
 
 // --- Window Blur Event ---
 window.addEventListener('blur', () => {
-    // Pan-related logic was here, will be cleaned if isPanModeActive is gone
-    // if (isPanModeActive) { ... }
     shiftKeyPressed = false;
 });
 
