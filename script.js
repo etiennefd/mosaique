@@ -22,7 +22,7 @@ let palette = [
     '#FFFFFF' // Add 10th color placeholder (initially white, same as spacing)
 ];
 const defaultPixelColorIndex = 8; // Index of default grid color (Pale Gray)
-const erasePixelColorIndex = 8;   // Index of color to use when "erasing" (Pale Gray)
+let rightClickSelectedColorIndex = defaultPixelColorIndex; // NEW: For right-click color
 let spacingColor = '#FFFFFF'; // NEW: Dedicated variable for spacing color
 
 let selectedColorIndex = 0; // Default to the first color (Dark Blue)
@@ -35,6 +35,7 @@ let lastClickCoords = null; // Store the last {row, col} clicked for Shift+Click
 let shiftKeyPressed = false; // Track if Shift key is pressed
 let currentTool = 'pencil'; // Default tool
 let currentDragMode = null; // 'draw' or 'erase' (pencil only for now)
+let activeDrawingColorIndex = 0; // NEW: Stores the color index to be used by the current operation
 let isDrawingShape = false;
 let shapeStartX = null;
 let shapeStartY = null;
@@ -310,19 +311,26 @@ function getPixelCoords(event) {
     return null; // Click is outside the grid boundaries
 }
 
-function handlePixelChange(row, col, mode, quadrant = null) { // Quadrant is still passed for potential use by Half-pixel tool
+function handlePixelChange(row, col, mode, quadrant = null, targetColorIndex = selectedColorIndex) { // Added targetColorIndex, defaults to primary
     const currentPixel = gridState[row][col];
     let changed = false;
-    const targetColorIndex = (mode === 'draw') ? selectedColorIndex : erasePixelColorIndex;
+    // const targetColorIndex = (mode === 'draw') ? selectedColorIndex : erasePixelColorIndex; // OLD LOGIC
 
-    // Revised logic: This function will be expanded for the Half-pixel tool.
-    // For now, it primarily handles solid fills. Pencil tool will always pass quadrant = null.
-    // Tools (bucket, shapes) don't use quadrant and will result in solid.
+    // Revised logic:
+    // If mode is 'erase', always revert to defaultPixelColorIndex, solid fill.
+    // Otherwise, proceed with drawing using the passed targetColorIndex.
 
-    // Default to solid fill for all tools unless specific Half-pixel logic (to be added) applies.
-    if (currentTool === 'tool-halfpixel' && quadrant && mode === 'draw') {
-        const clickedQuadrantStyle = `triangle-${quadrant}`;
-        const newMainColor = selectedColorIndex;
+    if (mode === 'erase') {
+        if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== defaultPixelColorIndex) {
+            gridState[row][col] = {
+                mainColorIndex: defaultPixelColorIndex,
+                secondaryColorIndex: defaultPixelColorIndex,
+                fillStyle: 'solid'
+            };
+            changed = true;
+        }
+    } else if (currentTool === 'tool-halfpixel' && quadrant && mode === 'draw') { // mode === 'draw' is implicit if not 'erase'
+        const newMainColor = targetColorIndex; // Use the passed target color
 
         const oldFillStyle = currentPixel.fillStyle;
         const oldMainColor = currentPixel.mainColorIndex;
@@ -336,11 +344,12 @@ function handlePixelChange(row, col, mode, quadrant = null) { // Quadrant is sti
             gridState[row][col] = {
                 mainColorIndex: newMainColor,
                 secondaryColorIndex: oldMainColor,  // Original solid color becomes secondary
-                fillStyle: clickedQuadrantStyle
+                fillStyle: `triangle-${quadrant}`
             };
             changed = true;
         } else if (oldFillStyle.startsWith('triangle-')) {
             // Pixel is already a triangle.
+            const clickedQuadrantStyle = `triangle-${quadrant}`;
             const oppositeQuadrantOfOldStyle = getOppositeQuadrant(oldFillStyle);
 
             // No-change checks:
@@ -362,13 +371,13 @@ function handlePixelChange(row, col, mode, quadrant = null) { // Quadrant is sti
             } else if (clickedQuadrantStyle === oppositeQuadrantOfOldStyle) {
                 // Case 2: Clicked quadrant corresponds to the half of the secondary color.
                 // "replace secondary with new color as primary, turn former primary into secondary color"
-                finalSecondaryColor = oldMainColor; 
+                finalSecondaryColor = oldMainColor;
             } else {
                 // Case 3: Clicked one of the other two (adjacent) quadrants.
                 // "apply triangle with new color as primary, keep former primary as new secondary"
                 finalSecondaryColor = oldMainColor;
             }
-            
+
             gridState[row][col] = {
                 mainColorIndex: finalMainColor,
                 secondaryColorIndex: finalSecondaryColor,
@@ -381,23 +390,25 @@ function handlePixelChange(row, col, mode, quadrant = null) { // Quadrant is sti
             // For now, treat as applying to a default background.
             gridState[row][col] = {
                 mainColorIndex: newMainColor,
-                secondaryColorIndex: defaultPixelColorIndex, 
-                fillStyle: clickedQuadrantStyle
+                secondaryColorIndex: defaultPixelColorIndex,
+                fillStyle: `triangle-${quadrant}`
             };
             changed = true;
         }
-    } else { // This case covers Pencil (quadrant = null), Bucket, Shapes, Erase for Half-pixel, etc.
-        const effectiveTargetColor = (currentTool === 'tool-halfpixel' && mode === 'erase') 
-                                      ? erasePixelColorIndex 
-                                      : targetColorIndex;
+    } else { // This case covers Pencil (quadrant = null), Bucket, Shapes. Mode is implicitly 'draw' here.
+        // const effectiveTargetColor = (currentTool === 'tool-halfpixel' && mode === 'erase') // OLD logic for erase
+        //                               ? defaultPixelColorIndex // erasePixelColorIndex replaced
+        //                               : targetColorIndex;
+        const effectiveTargetColor = targetColorIndex; // Use the passed target color directly
+
         let oldMainColor = currentPixel.mainColorIndex;
         let oldFillStyle = currentPixel.fillStyle;
 
         if (oldFillStyle !== 'solid' || oldMainColor !== effectiveTargetColor) {
             gridState[row][col] = {
                 mainColorIndex: effectiveTargetColor,
-                secondaryColorIndex: (oldFillStyle === 'solid' && oldMainColor !== effectiveTargetColor) 
-                                     ? oldMainColor 
+                secondaryColorIndex: (oldFillStyle === 'solid' && oldMainColor !== effectiveTargetColor)
+                                     ? oldMainColor
                                      : (oldFillStyle.startsWith('triangle-') ? currentPixel.secondaryColorIndex : defaultPixelColorIndex),
                 fillStyle: 'solid'
             };
@@ -467,7 +478,8 @@ function getOppositeQuadrant(fillStyle) {
 }
 
 // --- Line Drawing Utility ---
-function drawLineBetweenPixels(r1, c1, r2, c2, mode) {
+// MODIFIED: Added colorIndex parameter
+function drawLineBetweenPixels(r1, c1, r2, c2, mode, colorIndex) {
     // Simple line drawing algorithm (like Bresenham's principle)
     let dx = Math.abs(c2 - c1);
     let dy = Math.abs(r2 - r1);
@@ -483,7 +495,8 @@ function drawLineBetweenPixels(r1, c1, r2, c2, mode) {
     while (true) {
         // All tools using drawLineBetweenPixels will currently result in solid pixels.
         // Pencil is reverted to solid lines. Half-pixel tool will need specific handling later.
-        if (handlePixelChange(currentRow, currentCol, mode, null /* force solid */)) {
+        // Pass the determined colorIndex to handlePixelChange
+        if (handlePixelChange(currentRow, currentCol, mode, null /* force solid */, colorIndex)) {
              changed = true;
         }
 
@@ -505,6 +518,7 @@ function drawLineBetweenPixels(r1, c1, r2, c2, mode) {
 // --- End Line Drawing Utility ---
 
 // --- Flood Fill Utility ---
+// No change needed here, floodFill already takes fillColorIndex
 function floodFill(startRow, startCol, fillColorIndex) {
     const startPixel = gridState[startRow][startCol];
     // const startColorIndex = gridState[startRow][startCol];
@@ -649,6 +663,7 @@ function getCirclePixels(r1, c1, r2, c2) {
 }
 
 // Function to apply calculated pixels to the grid state
+// MODIFIED: Added colorIndex parameter
 function applyPixelsToGrid(pixels, colorIndex) {
     let changed = false;
     pixels.forEach(([r, c]) => {
@@ -660,7 +675,7 @@ function applyPixelsToGrid(pixels, colorIndex) {
         if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== colorIndex) {
             gridState[r][c] = {
                 mainColorIndex: colorIndex,
-                secondaryColorIndex: defaultPixelColorIndex,
+                secondaryColorIndex: defaultPixelColorIndex, // When applying a solid shape, secondary can be default
                 fillStyle: 'solid'
             };
             changed = true;
@@ -713,15 +728,16 @@ function eraseGridArea(rect) {
     for (let r = r1; r <= r2; r++) {
         for (let c = c1; c <= c2; c++) {
             if (r >= 0 && r < gridRows && c >= 0 && c < gridCols) {
-                // if (gridState[r][c] !== erasePixelColorIndex) {
-                //     gridState[r][c] = erasePixelColorIndex;
+                // if (gridState[r][c] !== erasePixelColorIndex) { // Old comment
+                //     gridState[r][c] = erasePixelColorIndex; // Old comment
                 //     changed = true;
                 // }
                 const currentPixel = gridState[r][c];
-                if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== erasePixelColorIndex) {
+                // Erase to default solid pixel state
+                if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== defaultPixelColorIndex) {
                     gridState[r][c] = {
-                        mainColorIndex: erasePixelColorIndex,
-                        secondaryColorIndex: defaultPixelColorIndex,
+                        mainColorIndex: defaultPixelColorIndex, 
+                        secondaryColorIndex: defaultPixelColorIndex, // Secondary also default for a truly erased/default pixel
                         fillStyle: 'solid'
                     };
                     changed = true;
@@ -729,7 +745,7 @@ function eraseGridArea(rect) {
             }
         }
     }
-     console.log(`Erased grid area R(${r1}-${r2}), C(${c1}-${c2})`);
+     console.log(`Erased grid area R(${r1}-${r2}), C(${c1}-${c2}) to default`);
      return changed;
 }
 
@@ -777,7 +793,7 @@ function eraseAreaOnPreview(rect) {
     const viewWidth = canvasContainer.clientWidth;
     const viewHeight = canvasContainer.clientHeight;
 
-    previewCtx.fillStyle = palette[erasePixelColorIndex];
+    previewCtx.fillStyle = palette[defaultPixelColorIndex]; // Use defaultPixelColorIndex for erasing preview area
     for (let r = r1; r <= r2; r++) {
         for (let c = c1; c <= c2; c++) {
             if (r >= 0 && r < gridRows && c >= 0 && c < gridCols) {
@@ -840,9 +856,10 @@ function drawBufferOnPreview(targetTopRow, targetLeftCol) {
     }
 }
 
-function drawPreviewShape(r1, c1, r2, c2, tool) {
+// MODIFIED: Added colorIndex parameter, defaults to selectedColorIndex if not provided (for previews)
+function drawPreviewShape(r1, c1, r2, c2, tool, colorIndex = selectedColorIndex) {
     if (!canvasContainer) return;
-    previewCtx.fillStyle = palette[selectedColorIndex];
+    previewCtx.fillStyle = palette[colorIndex]; // Use the provided colorIndex
     let pixelsToPreview = [];
     if (tool === 'tool-line') pixelsToPreview = getLinePixels(r1, c1, r2, c2);
     else if (tool === 'tool-rectangle') pixelsToPreview = getRectanglePixels(r1, c1, r2, c2);
@@ -868,10 +885,28 @@ function drawPreviewShape(r1, c1, r2, c2, tool) {
 // Flag to track if any pixel was actually changed during a mousedown/drag operation
 let changeOccurred = false;
 
+canvas.addEventListener('contextmenu', event => event.preventDefault()); // PREVENT DEFAULT RIGHT-CLICK MENU ON CANVAS
+
 canvas.addEventListener('mousedown', (event) => {
-    const coords = getPixelCoords(event); 
+    const coords = getPixelCoords(event);
     changeOccurred = false;
     lastPixelCoords = null;
+
+    // Determine active drawing color based on mouse button
+    if (event.button === 2) { // Right-click
+        activeDrawingColorIndex = rightClickSelectedColorIndex;
+        currentDragMode = 'draw'; // For pencil, right-click is draw with secondary color
+                                 // Other tools will just use activeDrawingColorIndex directly.
+        // For half-pixel, right-click also means 'draw' with the secondary color
+    } else if (event.button === 0) { // Left-click
+        activeDrawingColorIndex = selectedColorIndex;
+        currentDragMode = 'draw'; // Default for pencil
+        // Other tools use activeDrawingColorIndex.
+    } else {
+        // Other mouse buttons (e.g., middle mouse) - ignore for drawing
+        return;
+    }
+
     if (!coords && !isDrawingShape && !isDefiningSelection && !isMovingSelection) {
         return;
     }
@@ -886,68 +921,68 @@ canvas.addEventListener('mousedown', (event) => {
 
     isDrawingShape = false;
     isDefiningSelection = false;
-    isMovingSelection = false; 
+    isMovingSelection = false;
 
     // --- Tool Specific Logic ---
     if (currentTool === 'tool-pencil') {
-        isDrawingShape = false; // Pencil doesn't draw shapes
-        // ... (existing pencil logic: shift+click and drag start)
-        // ... (ensure history is saved here for pencil actions) ...
+        isDrawingShape = false;
         if (shiftKeyPressed && lastClickCoords && coords) { // Pencil Shift+Click Line
             isDragging = false;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
             // drawLineBetweenPixels calls handlePixelChange with quadrant=null, ensuring solid lines for pencil.
-            if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, coords.row, coords.col, 'draw')) {
+            // Mode is 'draw', color is activeDrawingColorIndex
+            if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, coords.row, coords.col, 'draw', activeDrawingColorIndex)) {
                 changeOccurred = true;
             }
             if (!changeOccurred && history.length > 0) { history.pop(); }
-            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // Still store full coords for other tools
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
         } else if (coords) { // Pencil Click/Drag Start
             isDragging = true;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
-            currentDragMode = 'draw';
+            // currentDragMode is already set based on button
             // Pencil tool mousedown passes null for quadrant to ensure solid pixel via handlePixelChange.
-            if (handlePixelChange(coords.row, coords.col, currentDragMode, null )) {
+            // Color is activeDrawingColorIndex
+            if (handlePixelChange(coords.row, coords.col, currentDragMode, null, activeDrawingColorIndex )) {
                 changeOccurred = true;
             }
-            // Store full coords for other tools that might use lastPixelCoords/lastClickCoords with quadrant.
-            lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
-            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
+            lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
         }
     } else if (currentTool === 'tool-bucket') {
         isDrawingShape = false;
         isDragging = false;
-        if (floodFill(coords.row, coords.col, selectedColorIndex)) {
+        // Flood fill with the activeDrawingColorIndex
+        if (floodFill(coords.row, coords.col, activeDrawingColorIndex)) {
             changeOccurred = true;
         }
         lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
     } else if (currentTool === 'tool-halfpixel') {
-        if (coords && coords.quadrant) { 
-            isDragging = true; 
-            currentDragMode = 'draw'; 
+        if (coords && coords.quadrant) {
+            isDragging = true;
+            // currentDragMode = 'draw'; // Already set based on button
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
-            if (handlePixelChange(coords.row, coords.col, currentDragMode, coords.quadrant)) {
-                changeOccurred = true; 
+            // Use activeDrawingColorIndex for the half-pixel main color
+            if (handlePixelChange(coords.row, coords.col, 'draw', coords.quadrant, activeDrawingColorIndex)) {
+                changeOccurred = true;
             }
             lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
-            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
         } else {
-            isDragging = false; 
+            isDragging = false;
         }
     } else if (['tool-line', 'tool-rectangle', 'tool-circle'].includes(currentTool)) {
         isDrawingShape = true;
-        isDragging = true; // Use isDragging to indicate shape drawing is active
-         // Save state *before* shape drawing starts
+        isDragging = true;
          if (history.length >= MAX_HISTORY) { history.shift(); }
          history.push(deepCopyGrid(gridState));
-         console.log(`Starting shape: ${currentTool}`);
-         lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // Update last click
+         console.log(`Starting shape: ${currentTool} with color index ${activeDrawingColorIndex}`);
+         lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
     } else if (currentTool === 'tool-select') {
         if (selectionRect && isInsideRect(coords.row, coords.col, selectionRect)) {
-            // --- Start Moving Selection --- 
+            // --- Start Moving Selection ---
             isMovingSelection = true;
             isDragging = true; // Use isDragging for move events
             moveStartCoords = { row: coords.row, col: coords.col };
@@ -961,23 +996,23 @@ canvas.addEventListener('mousedown', (event) => {
             history.push(deepCopyGrid(gridState));
             console.log("Starting selection move.");
             // No change yet, changeOccurred = false
-            // --- End Start Moving --- 
+            // --- End Start Moving ---
         } else {
-             // --- Start Defining Selection --- 
+             // --- Start Defining Selection ---
             clearPreviewCanvas(); // Clear previous selection outline if any
             selectionRect = null; // Clear existing selection
             selectionBuffer = null; // Clear buffer if starting new selection
             isDefiningSelection = true;
             isDragging = true;
             console.log("Starting selection definition.");
-            // --- End Start Defining --- 
+            // --- End Start Defining ---
         }
         lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
     } else {
         console.warn(`Mousedown: Tool not implemented or unrecognized: ${currentTool}`);
         isDrawingShape = false;
         isDragging = false;
-        if(coords) { // Set lastClickCoords even for unimplemented tools if coords exist
+        if(coords) {
             lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
         } else {
             lastClickCoords = null;
@@ -990,60 +1025,47 @@ canvas.addEventListener('mousemove', (event) => {
     if (isDragging) {
         const coords = getPixelCoords(event);
         if (!coords) return;
-        const { row, col, quadrant } = coords; // Destructure here for broader availability
+        const { row, col, quadrant } = coords;
 
         if (currentTool === 'tool-pencil') {
-            // const { row, col, quadrant } = coords; // No longer needed here, already destructured
             const lastRow = lastPixelCoords.row;
             const lastCol = lastPixelCoords.col;
-            // const lastQuadrant = lastPixelCoords.quadrant; // Used in comparison below
 
             if (row !== lastRow || col !== lastCol) {
-                // --- Moved to a DIFFERENT pixel cell ---
-                // drawLineBetweenPixels will handle solidification for interpolated pixels if in triangle mode
-                if (drawLineBetweenPixels(lastRow, lastCol, row, col, currentDragMode)) {
+                // Pass currentDragMode (which is 'draw') and activeDrawingColorIndex
+                if (drawLineBetweenPixels(lastRow, lastCol, row, col, currentDragMode, activeDrawingColorIndex)) {
                     changeOccurred = true;
                 }
             } else {
-                // --- Still within the SAME pixel cell (row === lastRow && col === lastCol) ---
+                // Still within the SAME pixel cell
                 if (quadrant && lastPixelCoords.quadrant && quadrant !== lastPixelCoords.quadrant) {
-                    // Moved to a different quadrant within the same pixel.
                     const currentPixelState = gridState[row][col];
                     if (currentPixelState && currentPixelState.fillStyle.startsWith('triangle-')) {
-                        // And it was a triangle. Solidify it.
-                        if (handlePixelChange(row, col, currentDragMode, null /* force solid */)) {
+                        // Solidify with activeDrawingColorIndex
+                        if (handlePixelChange(row, col, currentDragMode, null /* force solid */, activeDrawingColorIndex)) {
                             changeOccurred = true;
                         }
                     }
-                    // If it's already solid, or if the new quadrant is null (e.g. center line),
-                    // or if the old quadrant was null, or if quadrants are the same, do nothing more here.
-                    // The initial dab or line drawing would have handled it.
                 }
             }
-            // Update lastPixelCoords for the next mousemove event, regardless of what happened above.
             lastPixelCoords = { row, col, quadrant };
-            // Note: changeOccurred is managed by handlePixelChange/drawLineBetweenPixels
         } else if (isDrawingShape && ['tool-line', 'tool-rectangle', 'tool-circle'].includes(currentTool)) {
-            // --- Shape Preview Logic --- 
-            clearPreviewCanvas(); // Clear before drawing shape preview
-            // Now row and col from the destructured coords are available
-            drawPreviewShape(shapeStartY, shapeStartX, row, col, currentTool);
-             // lastPixelCoords is not needed here, we use shapeStartX/Y and current coords
-            // --- End Shape Preview --- 
+            clearPreviewCanvas();
+            // Preview with activeDrawingColorIndex
+            drawPreviewShape(shapeStartY, shapeStartX, row, col, currentTool, activeDrawingColorIndex);
         } else if (isDefiningSelection && currentTool === 'tool-select') {
-            // --- Selection Preview --- 
-            clearPreviewCanvas(); // <<<< ADD THIS LINE BACK HERE
+            clearPreviewCanvas();
             drawPreviewSelection(shapeStartY, shapeStartX, row, col);
-            // --- End Selection Preview --- 
+            // --- End Selection Preview ---
         } else if (isMovingSelection && currentTool === 'tool-select') {
-             // --- Selection Move Preview --- 
+             // --- Selection Move Preview ---
              if (selectionBuffer && moveOffset && selectionRect) { // Ensure selectionRect exists
                 const newTopLeftRow = row - moveOffset.dr;
                 const newTopLeftCol = col - moveOffset.dc;
 
                 clearPreviewCanvas();
                 // Erase the *original* selection area on the preview first
-                eraseAreaOnPreview(selectionRect);
+                eraseAreaOnPreview(selectionRect); // eraseAreaOnPreview still uses defaultPixelColorIndex, which is fine for preview
 
                 // Draw buffer content at new position
                 drawBufferOnPreview(newTopLeftRow, newTopLeftCol);
@@ -1053,22 +1075,15 @@ canvas.addEventListener('mousemove', (event) => {
                 const c2 = newTopLeftCol + selectionBuffer.width - 1;
                 drawPreviewSelection(newTopLeftRow, newTopLeftCol, r2, c2);
              }
-             // --- End Move Preview --- 
+             // --- End Move Preview ---
         } else if (currentTool === 'tool-halfpixel') {
-            if (coords && coords.quadrant) { // Ensure new coords and quadrant are valid
-                // Only act if pixel or quadrant changes. Half-pixel tool affects one pixel at a time.
-                if (coords.row !== lastPixelCoords.row || 
-                    coords.col !== lastPixelCoords.col || 
+            if (coords && coords.quadrant) {
+                if (coords.row !== lastPixelCoords.row ||
+                    coords.col !== lastPixelCoords.col ||
                     coords.quadrant !== lastPixelCoords.quadrant) {
-                    
-                    // Call handlePixelChange for the new pixel/quadrant.
-                    // History was pushed on mousedown. Each step modifies that state.
-                    if (handlePixelChange(coords.row, coords.col, 'draw', coords.quadrant)) {
-                        changeOccurred = true; // A change was made in this step
-                    } else {
-                        // Even if this specific step didn't change the pixel (e.g. target same as current state for this new pixel/quadrant),
-                        // if an earlier step in this drag sequence *did* make a change, we want to keep changeOccurred true.
-                        // changeOccurred remains as it was if this step made no change.
+                    // Use 'draw' mode and activeDrawingColorIndex
+                    if (handlePixelChange(coords.row, coords.col, 'draw', coords.quadrant, activeDrawingColorIndex)) {
+                        changeOccurred = true;
                     }
                 }
                 lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
@@ -1078,13 +1093,13 @@ canvas.addEventListener('mousemove', (event) => {
 });
 
 canvas.addEventListener('mouseup', (event) => {
+    // activeDrawingColorIndex is still set from mousedown
     if (isDragging) {
         let finalizeAction = false;
-        let actionMadeChange = false; // Track if the finalized action modified gridState
+        let actionMadeChange = false;
 
         if (isDrawingShape && ['tool-line', 'tool-rectangle', 'tool-circle'].includes(currentTool)) {
-            // --- Finalize Shape Drawing --- 
-            const coords = getPixelCoords(event); // Need end coords from event
+            const coords = getPixelCoords(event);
             if (coords && shapeStartX !== null && shapeStartY !== null) {
                  const { row, col } = coords;
                  let pixels = [];
@@ -1096,21 +1111,19 @@ canvas.addEventListener('mouseup', (event) => {
                     pixels = getCirclePixels(shapeStartY, shapeStartX, row, col);
                  }
 
-                 if (applyPixelsToGrid(pixels, selectedColorIndex)) {
-                    changeOccurred = true; // Mark change
-                    drawGrid(); // Redraw main canvas with the final shape
-                    console.log(`Shape ${currentTool} finalized.`);
+                 // Apply with activeDrawingColorIndex
+                 if (applyPixelsToGrid(pixels, activeDrawingColorIndex)) {
+                    changeOccurred = true;
+                    drawGrid();
+                    console.log(`Shape ${currentTool} finalized with color index ${activeDrawingColorIndex}.`);
                  } else {
-                     // If applyPixelsToGrid didn't change anything (e.g., single point shape?)
                      console.log("Shape resulted in no change.");
-                     changeOccurred = false; // Ensure flag is false if no change
+                     changeOccurred = false;
                  }
             }
-            // --- End Finalize Shape --- 
-             actionMadeChange = changeOccurred;
-             finalizeAction = true; // A shape was potentially drawn
+            actionMadeChange = changeOccurred;
+            finalizeAction = true;
         } else if (isDefiningSelection && currentTool === 'tool-select') {
-            // --- Finalize Selection --- 
             const coords = getPixelCoords(event);
             if (coords && shapeStartX !== null && shapeStartY !== null) {
                  const { row, col } = coords;
@@ -1138,9 +1151,8 @@ canvas.addEventListener('mouseup', (event) => {
                 clearPreviewCanvas();
             }
             finalizeAction = true; // Selection action attempted
-             // --- End Finalize Selection --- 
+             // --- End Finalize Selection ---
         } else if (isMovingSelection && currentTool === 'tool-select') {
-            // --- Finalize Selection Move --- 
             clearPreviewCanvas();
             const coords = getPixelCoords(event);
             if (coords && selectionBuffer && moveOffset) {
@@ -1148,7 +1160,7 @@ canvas.addEventListener('mouseup', (event) => {
                  const finalTopLeftRow = row - moveOffset.dr;
                  const finalTopLeftCol = col - moveOffset.dc;
 
-                 // Erase the original area
+                 // Erase the original area (uses defaultPixelColorIndex)
                  const eraseChanged = eraseGridArea(selectionRect);
                  // Paste the buffer at the new location
                  const pasteChanged = pasteBufferToGrid(finalTopLeftRow, finalTopLeftCol);
@@ -1170,22 +1182,19 @@ canvas.addEventListener('mouseup', (event) => {
                  console.log(`Selection moved to R(${selectionRect.r1}-${selectionRect.r2}), C(${selectionRect.c1}-${selectionRect.c2})`);
             }
             finalizeAction = true;
-            // --- End Finalize Move --- 
+            // --- End Finalize Move ---
         } else if (currentTool === 'tool-pencil') {
-            actionMadeChange = changeOccurred;
+            actionMadeChange = changeOccurred; // changeOccurred was set by handlePixelChange/drawLineBetweenPixels
             finalizeAction = true;
         } else if (currentTool === 'tool-bucket') {
-            // Bucket finalize logic might need checking if floodFill returned true
-             actionMadeChange = changeOccurred; // Assuming changeOccurred was set by floodFill
+             actionMadeChange = changeOccurred; // changeOccurred was set by floodFill
              finalizeAction = true;
         } else if (currentTool === 'tool-halfpixel') {
-            // For half-pixel, the action is considered finalized if dragging occurred.
-            // changeOccurred reflects if any pixel state actually changed during the mousedown/drag sequence.
-            actionMadeChange = changeOccurred;
-            finalizeAction = true; // A half-pixel interaction was attempted.
+            actionMadeChange = changeOccurred; // changeOccurred was set by handlePixelChange
+            finalizeAction = true;
         }
 
-        // --- General Drag/Shape/Selection End Cleanup --- 
+        // ... existing cleanup and history pop logic ...
         isDragging = false;
         isDrawingShape = false;
         isDefiningSelection = false;
@@ -1193,7 +1202,8 @@ canvas.addEventListener('mouseup', (event) => {
         shapeStartX = null;
         shapeStartY = null;
         lastPixelCoords = null;
-        currentDragMode = null;
+        currentDragMode = null; // Reset drag mode
+        // activeDrawingColorIndex is reset at next mousedown
         moveStartCoords = null; // Reset move coords
         moveOffset = null;
 
@@ -1558,6 +1568,7 @@ function determineCursorForCurrentTool() {
 // For simplicity, keep them nested for now, but ensure setupOptionsPanel is called first.
 let updateSelectedSwatch = () => {}; // Placeholder
 let updateSelectedTool = () => {};   // Placeholder
+let updateRightClickSelectedSwatchUI = () => {}; // NEW Placeholder
 
 let activeColorPickerIndex = -1; // Track which swatch is being edited
 let currentPickerInstance = null; // Hold the current picker instance
@@ -1579,11 +1590,25 @@ function setupOptionsPanel() {
             oldSelected.classList.remove('selected');
         }
         // Add selected class to the new swatch
-        const newSelected = document.getElementById(`color-${newIndex}`);
-        if (newSelected) {
-            newSelected.classList.add('selected');
+        const newSelectedSwatch = document.getElementById(`color-${newIndex}`); // Renamed variable to avoid conflict
+        if (newSelectedSwatch) {
+            newSelectedSwatch.classList.add('selected');
         }
         // console.log(`Color ${newIndex} (${palette[newIndex]}) selected.`); // Log moved to keydown/click handlers
+    };
+
+    updateRightClickSelectedSwatchUI = (newIndex) => { // NEW FUNCTION
+        // Remove right-selected class from previously selected swatch
+        const oldRightSelected = document.querySelector('.color-options .color-swatch.right-selected');
+        if (oldRightSelected) {
+            oldRightSelected.classList.remove('right-selected');
+        }
+        // Add right-selected class to the new swatch
+        const newRightSelectedSwatch = document.getElementById(`color-${newIndex}`);
+        if (newRightSelectedSwatch) {
+            newRightSelectedSwatch.classList.add('right-selected');
+        }
+        console.log(`Right-click color selected: index ${newIndex}`);
     };
 
     updateSelectedTool = (newToolId) => {
@@ -1626,24 +1651,29 @@ function setupOptionsPanel() {
     colorSwatches.forEach((swatch, index) => {
         // This loop now correctly handles index 0-8 for the palette
         swatch.style.backgroundColor = palette[index];
+        swatch.addEventListener('contextmenu', (event) => { // MODIFIED for right-click select
+            event.preventDefault();
+            rightClickSelectedColorIndex = index;
+            updateRightClickSelectedSwatchUI(index);
+        });
 
         const openPickerHandler = (event) => {
             event.preventDefault(); // ADDED: Attempt to prevent default dblclick text selection
-            const indexToEdit = index; 
+            const indexToEdit = index;
             activeColorPickerIndex = indexToEdit;
-            
-            const paletteStateAtPickerOpen = [...palette]; 
-            const originalColorOfThisSwatch = palette[indexToEdit]; 
+
+            const paletteStateAtPickerOpen = [...palette];
+            const originalColorOfThisSwatch = palette[indexToEdit];
             let pickerWasFinalized = false;
 
             console.log(`Opening picker for palette index ${indexToEdit}, color ${originalColorOfThisSwatch}`);
-            if (currentPickerInstance) { currentPickerInstance.destroy(); } 
+            if (currentPickerInstance) { currentPickerInstance.destroy(); }
             currentPickerInstance = new Picker({
                parent: swatch, popup: 'top', color: originalColorOfThisSwatch,
                alpha: false, editor: true, editorFormat: 'hex',
                onChange: function(newColor) {
                    const hexColor = newColor.hex.substring(0, 7);
-                   if (indexToEdit < 0 || indexToEdit >= 9) { return; } 
+                   if (indexToEdit < 0 || indexToEdit >= 9) { return; }
 
                    palette[indexToEdit] = hexColor;
                    const editedSwatch = document.getElementById(`color-${indexToEdit}`);
@@ -1651,14 +1681,14 @@ function setupOptionsPanel() {
                         editedSwatch.style.backgroundColor = hexColor;
                         editedSwatch.title = hexColor;
                    }
-                   drawGrid(); 
+                   drawGrid();
                },
                onDone: function(newColor) {
                     pickerWasFinalized = true;
                     const finalHexColor = newColor.hex.substring(0, 7);
-                    if (indexToEdit < 0 || indexToEdit >= 9) { return; } 
+                    if (indexToEdit < 0 || indexToEdit >= 9) { return; }
 
-                    palette[indexToEdit] = finalHexColor; 
+                    palette[indexToEdit] = finalHexColor;
                     const editedSwatch = document.getElementById(`color-${indexToEdit}`);
                     if (editedSwatch) {
                          editedSwatch.style.backgroundColor = finalHexColor;
@@ -1667,16 +1697,16 @@ function setupOptionsPanel() {
 
                     if (originalColorOfThisSwatch !== finalHexColor) {
                         if (history.length >= MAX_HISTORY) { history.shift(); }
-                        history.push({ 
-                            grid: deepCopyGrid(gridState), 
-                            pal: paletteStateAtPickerOpen, 
-                            spacingColor: spacingColor 
-                        }); 
+                        history.push({
+                            grid: deepCopyGrid(gridState),
+                            pal: paletteStateAtPickerOpen,
+                            spacingColor: spacingColor
+                        });
                         console.log(`State saved (Palette Change for index ${indexToEdit}). History size: ${history.length}`);
                     }
-                    drawGrid(); 
+                    drawGrid();
                },
-               onClose: function() { 
+               onClose: function() {
                     if (!pickerWasFinalized) {
                         palette[indexToEdit] = originalColorOfThisSwatch;
                         const editedSwatch = document.getElementById(`color-${indexToEdit}`);
@@ -1684,7 +1714,7 @@ function setupOptionsPanel() {
                              editedSwatch.style.backgroundColor = originalColorOfThisSwatch;
                              editedSwatch.title = originalColorOfThisSwatch;
                         }
-                        drawGrid(); 
+                        drawGrid();
                     }
                     console.log(`Picker closed (Palette Index ${indexToEdit}). Finalized: ${pickerWasFinalized}`);
                     currentPickerInstance = null;
@@ -1700,10 +1730,8 @@ function setupOptionsPanel() {
             updateSelectedSwatch(index);
             console.log(`Color selected via click: index ${index}`);
         });
-        // Right-click to open picker
-        swatch.addEventListener('contextmenu', openPickerHandler);
-        // Add dblclick listener solely to prevent default text selection behavior
-        swatch.addEventListener('dblclick', openPickerHandler);
+        // Double-click to open picker
+        swatch.addEventListener('dblclick', openPickerHandler); // MODIFIED from contextmenu
     });
 
     // --- Refactored Spacing Color Picker Logic ---
@@ -1774,6 +1802,7 @@ function setupOptionsPanel() {
     // Set initial selections for tool and color (already done earlier, this is fine)
     updateSelectedSwatch(selectedColorIndex);
     updateSelectedTool(`tool-${currentTool}`);
+    updateRightClickSelectedSwatchUI(rightClickSelectedColorIndex); // Initialize right-click swatch UI
 
     // Populate initial values and add direct listeners for grid config inputs
     const pixelSizeInput = document.getElementById('pixelSizeInput');
