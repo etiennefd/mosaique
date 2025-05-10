@@ -151,6 +151,41 @@
         }
         /* The BG color swatch might need slight adjustment if it was in its own div */
         /* The label for BG color and the swatch itself are in one div, which is now inline-block */
+
+        /* Options Panel Collapsible Styles */
+        .options-panel-header {
+            cursor: pointer;
+            padding: 5px;
+            background-color: #e0e0e0; /* Slightly darker to distinguish */
+            border-bottom: 1px solid #ccc;
+            margin: -10px -10px 10px -10px; /* Adjust to fit nicely */
+            border-top-left-radius: 5px; /* Match panel radius */
+            border-top-right-radius: 5px; /* Match panel radius */
+        }
+        .options-panel-header h4 {
+            margin: 0;
+            font-size: 14px;
+            display: flex; /* Use flex to align text and arrow */
+            justify-content: space-between; /* Puts arrow on the right */
+            align-items: center;
+        }
+        .options-panel-header h4 span { /* The little arrow */
+            font-size: 12px;
+            transition: transform 0.3s ease;
+        }
+
+        #options-panel.collapsed .options-panel-content {
+            display: none;
+        }
+        #options-panel.collapsed .options-panel-header h4 span {
+            transform: rotate(-90deg); /* Point arrow left or up when collapsed */
+        }
+        #options-panel.collapsed .options-panel-header {
+            /* Ensure header bottom border is visible and panel has bottom radius when collapsed */
+            margin-bottom: -10px; /* Removes space to content */
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+        }
     </style>
 </head>
 <body>
@@ -160,58 +195,63 @@
     </div>
 
     <div id="options-panel">
-        <div class="panel-section tool-options">
-            <h4>Tools</h4>
-            <button id="tool-pencil" title="Pencil (B/P)">✏️/B</button>
-            <button id="tool-halfpixel" title="Half-pixel Tool (T)">✏️📐/T</button>
-            <button id="tool-bucket" title="Paint Bucket (G)">🪣/G</button>
-            <button id="tool-line" title="Line (L)">📏/L</button>
-            <button id="tool-rectangle" title="Rectangle (R)">⬜/R</button>
-            <button id="tool-circle" title="Circle (C)">⚪/C</button>
-            <button id="tool-select" title="Selection (S)">✂️/S</button>
+        <div class="options-panel-header">
+            <h4>Mosaïque Options <span>▼</span></h4>
         </div>
-        <div class="panel-section color-options">
-             <h4>Colors</h4>
-             <div class="color-swatch-container">
-                 <div class="color-swatch" id="color-0" style="background-color: #00008B;" title="Dark Blue"></div>
-                 <div class="color-swatch" id="color-1" style="background-color: #0000CD;" title="Medium Blue"></div>
-                 <div class="color-swatch" id="color-2" style="background-color: #4169E1;" title="Royal Blue"></div>
-                 <div class="color-swatch" id="color-3" style="background-color: #6495ED;" title="Cornflower Blue"></div>
-                 <div class="color-swatch" id="color-4" style="background-color: #ADD8E6;" title="Light Blue"></div>
-                 <div class="color-swatch" id="color-5" style="background-color: #FFD700;" title="Gold"></div>
-                 <div class="color-swatch" id="color-6" style="background-color: #EEE8AA;" title="Pale Goldenrod"></div>
-                 <div class="color-swatch" id="color-7" style="background-color: #FFFFFF;" title="White"></div>
-                 <div class="color-swatch" id="color-8" style="background-color: #E0E0E0;" title="Pale Gray"></div>
-             </div>
-        </div>
-        <div class="panel-section" id="tool-specific-options-panel" style="display: none;">
-            <h4>Tool Options</h4>
-            <div id="pencil-options" style="display: none;">
-                <!-- Triangle mode checkbox and label are REMOVED from here -->
+        <div class="options-panel-content">
+            <div class="panel-section tool-options">
+                <h4>Tools</h4>
+                <button id="tool-pencil" title="Pencil (B/P)">✏️/B</button>
+                <button id="tool-halfpixel" title="Half-pixel Tool (T)">✏️📐/T</button>
+                <button id="tool-bucket" title="Paint Bucket (G)">🪣/G</button>
+                <button id="tool-line" title="Line (L)">📏/L</button>
+                <button id="tool-rectangle" title="Rectangle (R)">⬜/R</button>
+                <button id="tool-circle" title="Circle (C)">⚪/C</button>
+                <button id="tool-select" title="Selection (S)">✂️/S</button>
             </div>
-            <!-- Other tool-specific options can be added here -->
-        </div>
-        <div class="panel-section grid-config-options">
-            <h4>Grid Configuration</h4>
-            <div>
-                <label for="pixelSizeInput">Pixel Size (1-15):</label>
-                <input type="number" id="pixelSizeInput" min="1" max="15" value="15">
+            <div class="panel-section color-options">
+                 <h4>Colors</h4>
+                 <div class="color-swatch-container">
+                     <div class="color-swatch" id="color-0" style="background-color: #00008B;" title="Dark Blue"></div>
+                     <div class="color-swatch" id="color-1" style="background-color: #0000CD;" title="Medium Blue"></div>
+                     <div class="color-swatch" id="color-2" style="background-color: #4169E1;" title="Royal Blue"></div>
+                     <div class="color-swatch" id="color-3" style="background-color: #6495ED;" title="Cornflower Blue"></div>
+                     <div class="color-swatch" id="color-4" style="background-color: #ADD8E6;" title="Light Blue"></div>
+                     <div class="color-swatch" id="color-5" style="background-color: #FFD700;" title="Gold"></div>
+                     <div class="color-swatch" id="color-6" style="background-color: #EEE8AA;" title="Pale Goldenrod"></div>
+                     <div class="color-swatch" id="color-7" style="background-color: #FFFFFF;" title="White"></div>
+                     <div class="color-swatch" id="color-8" style="background-color: #E0E0E0;" title="Pale Gray"></div>
+                 </div>
             </div>
-            <div>
-                <label for="spacingInput">Spacing (0-5):</label>
-                <input type="number" id="spacingInput" min="0" max="5" value="1">
+            <div class="panel-section" id="tool-specific-options-panel" style="display: none;">
+                <h4>Tool Options</h4>
+                <div id="pencil-options" style="display: none;">
+                    <!-- Triangle mode checkbox and label are REMOVED from here -->
+                </div>
+                <!-- Other tool-specific options can be added here -->
             </div>
-            <div>
-                <label for="color-9-label">Background:</label>
-                <div class="color-swatch" id="color-9" style="background-color: #FFFFFF; display: inline-block; vertical-align: middle;" title="Background Color"></div>
-            </div>
-            <div>
-                <label for="gridRowsInput">Grid Rows (10-500):</label>
-                <input type="number" id="gridRowsInput" min="10" max="500" value="200">
-            </div>
-            <div>
-                <label for="gridColsInput">Grid Columns (10-800):</label>
-                <input type="number" id="gridColsInput" min="10" max="800" value="400">
+            <div class="panel-section grid-config-options">
+                <h4>Grid Configuration</h4>
+                <div>
+                    <label for="pixelSizeInput">Pixel Size (1-15):</label>
+                    <input type="number" id="pixelSizeInput" min="1" max="15" value="15">
+                </div>
+                <div>
+                    <label for="spacingInput">Spacing (0-5):</label>
+                    <input type="number" id="spacingInput" min="0" max="5" value="1">
+                </div>
+                <div>
+                    <label for="color-9-label">Background:</label>
+                    <div class="color-swatch" id="color-9" style="background-color: #FFFFFF; display: inline-block; vertical-align: middle;" title="Background Color"></div>
+                </div>
+                <div>
+                    <label for="gridRowsInput">Grid Rows (10-500):</label>
+                    <input type="number" id="gridRowsInput" min="10" max="500" value="200">
+                </div>
+                <div>
+                    <label for="gridColsInput">Grid Columns (10-800):</label>
+                    <input type="number" id="gridColsInput" min="10" max="800" value="400">
+                </div>
             </div>
         </div>
     </div>

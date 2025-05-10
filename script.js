@@ -1579,9 +1579,31 @@ function setupOptionsPanel() {
     const spacingSwatchElement = document.getElementById('color-9'); // Get spacing swatch directly
     const toolSpecificOptionsPanel = document.getElementById('tool-specific-options-panel');
     const pencilOptionsDiv = document.getElementById('pencil-options');
-    // const triangleModeCheckbox = document.getElementById('triangleModeCheckbox'); // Reference REMOVED
 
-    // Initialization of isTriangleModeEnabled REMOVED
+    // NEW: Collapsible panel logic
+    const optionsPanel = document.getElementById('options-panel');
+    const panelHeader = document.querySelector('.options-panel-header');
+    if (panelHeader && optionsPanel) {
+        panelHeader.addEventListener('click', () => {
+            optionsPanel.classList.toggle('collapsed');
+            // Optional: Save state to localStorage
+            if (optionsPanel.classList.contains('collapsed')) {
+                localStorage.setItem('optionsPanelCollapsed', 'true');
+            } else {
+                localStorage.setItem('optionsPanelCollapsed', 'false');
+            }
+        });
+
+        // Optional: Restore state from localStorage on load
+        if (localStorage.getItem('optionsPanelCollapsed') === 'true') {
+            optionsPanel.classList.add('collapsed');
+        }
+    } else {
+        console.warn("Options panel header or panel itself not found for collapse functionality.");
+    }
+    // END NEW: Collapsible panel logic
+
+    // const triangleModeCheckbox = document.getElementById('triangleModeCheckbox'); // Reference REMOVED
 
     updateSelectedSwatch = (newIndex) => {
         // Remove selected class from previously selected swatch
