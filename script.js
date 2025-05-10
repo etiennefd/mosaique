@@ -892,11 +892,10 @@ canvas.addEventListener('mousemove', (event) => {
     if (isDragging) {
         const coords = getPixelCoords(event);
         if (!coords) return;
-        // const { row, col } = coords; // Destructure later if needed by specific tool logic
+        const { row, col, quadrant } = coords; // Destructure here for broader availability
 
         if (currentTool === 'pencil') {
-            // lastPixelCoords is guaranteed to be set by mousedown if isDragging is true for pencil.
-            const { row, col, quadrant } = coords;
+            // const { row, col, quadrant } = coords; // No longer needed here, already destructured
             const lastRow = lastPixelCoords.row;
             const lastCol = lastPixelCoords.col;
             // const lastQuadrant = lastPixelCoords.quadrant; // Used in comparison below
@@ -929,6 +928,7 @@ canvas.addEventListener('mousemove', (event) => {
         } else if (isDrawingShape && ['line', 'rectangle', 'circle'].includes(currentTool)) {
             // --- Shape Preview Logic --- 
             clearPreviewCanvas(); // Clear before drawing shape preview
+            // Now row and col from the destructured coords are available
             drawPreviewShape(shapeStartY, shapeStartX, row, col, currentTool);
              // lastPixelCoords is not needed here, we use shapeStartX/Y and current coords
             // --- End Shape Preview --- 
