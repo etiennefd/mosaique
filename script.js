@@ -169,16 +169,58 @@ function drawGrid() {
 
             // For now, always draw the mainColorIndex. Triangle logic will be added later.
             if (pixel && typeof pixel.mainColorIndex === 'number') {
-                if (pixel.mainColorIndex >= 0 && pixel.mainColorIndex < 9) {
-                    ctx.fillStyle = palette[pixel.mainColorIndex];
+                if (pixel.fillStyle === 'solid') {
+                    if (pixel.mainColorIndex >= 0 && pixel.mainColorIndex < palette.length) { // Use palette.length for safety
+                        ctx.fillStyle = palette[pixel.mainColorIndex];
+                    } else {
+                        ctx.fillStyle = palette[defaultPixelColorIndex];
+                    }
+                    ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+                } else if (pixel.fillStyle && pixel.fillStyle.startsWith('triangle-')) {
+                    // 1. Fill the entire pixel cell with its secondaryColorIndex.
+                    if (pixel.secondaryColorIndex !== undefined && pixel.secondaryColorIndex < palette.length) {
+                        ctx.fillStyle = palette[pixel.secondaryColorIndex];
+                    } else {
+                        ctx.fillStyle = palette[defaultPixelColorIndex]; // Fallback for safety
+                    }
+                    ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
+
+                    // 2. Then draw the triangle path with its mainColorIndex on top.
+                    if (pixel.mainColorIndex >= 0 && pixel.mainColorIndex < palette.length) {
+                        ctx.fillStyle = palette[pixel.mainColorIndex];
+                    } else {
+                        ctx.fillStyle = palette[defaultPixelColorIndex]; // Fallback for safety
+                    }
+                    ctx.beginPath();
+                    if (pixel.fillStyle === 'triangle-tl') { // Top-left corner
+                        ctx.moveTo(logicalX, logicalY); // Top-left
+                        ctx.lineTo(logicalX + pixelSize, logicalY); // Top-right
+                        ctx.lineTo(logicalX, logicalY + pixelSize); // Bottom-left
+                    } else if (pixel.fillStyle === 'triangle-tr') { // Top-right corner
+                        ctx.moveTo(logicalX, logicalY); // Top-left
+                        ctx.lineTo(logicalX + pixelSize, logicalY); // Top-right
+                        ctx.lineTo(logicalX + pixelSize, logicalY + pixelSize); // Bottom-right
+                    } else if (pixel.fillStyle === 'triangle-bl') { // Bottom-left corner
+                        ctx.moveTo(logicalX, logicalY); // Top-left
+                        ctx.lineTo(logicalX, logicalY + pixelSize); // Bottom-left
+                        ctx.lineTo(logicalX + pixelSize, logicalY + pixelSize); // Bottom-right
+                    } else if (pixel.fillStyle === 'triangle-br') { // Bottom-right corner
+                        ctx.moveTo(logicalX + pixelSize, logicalY); // Top-right
+                        ctx.lineTo(logicalX + pixelSize, logicalY + pixelSize); // Bottom-right
+                        ctx.lineTo(logicalX, logicalY + pixelSize); // Bottom-left
+                    }
+                    ctx.closePath();
+                    ctx.fill();
                 } else {
+                    // Fallback for unknown fillStyle or malformed pixel data
                     ctx.fillStyle = palette[defaultPixelColorIndex];
+                    ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
                 }
             } else {
-                 // Fallback if pixel data is malformed, though createNewGridStateFromOld should prevent this
+                 // Fallback if pixel data is malformed
                 ctx.fillStyle = palette[defaultPixelColorIndex];
+                ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
             }
-            ctx.fillRect(logicalX, logicalY, pixelSize, pixelSize);
         }
     }
     // console.log(`Drew grid for visible rows: ${firstRow}-${lastRow}, cols: ${firstCol}-${lastCol}`);
