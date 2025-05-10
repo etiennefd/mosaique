@@ -266,34 +266,71 @@ function handlePixelChange(row, col, mode, quadrant = null) { // Quadrant is sti
 
     // Default to solid fill for all tools unless specific Half-pixel logic (to be added) applies.
     if (currentTool === 'tool-halfpixel' && quadrant && mode === 'draw') {
-        const targetFillStyle = `triangle-${quadrant}`;
-        const targetMainColor = selectedColorIndex; // Half-pixel tool always uses selected color for its main part
-        let newSecondaryColor = defaultPixelColorIndex; // Default secondary
+        const clickedQuadrantStyle = `triangle-${quadrant}`;
+        const newMainColor = selectedColorIndex;
 
-        if (currentPixel.fillStyle === 'solid') {
-            if (currentPixel.mainColorIndex === targetMainColor) {
-                // Pixel is already solid with the target color, no effect.
-                return false; 
+        const oldFillStyle = currentPixel.fillStyle;
+        const oldMainColor = currentPixel.mainColorIndex;
+        const oldSecondaryColor = currentPixel.secondaryColorIndex;
+
+        if (oldFillStyle === 'solid') {
+            if (oldMainColor === newMainColor) { // Solid color is already the selected color
+                return false; // No change
             }
-            newSecondaryColor = currentPixel.mainColorIndex; // Original solid color becomes secondary
-        } else if (currentPixel.fillStyle.startsWith('triangle-')) {
-            // If it's already a triangle, the existing main color becomes the new secondary color.
-            // This handles changing the quadrant or color of an existing triangle.
-            newSecondaryColor = currentPixel.mainColorIndex;
-            // If applying the same triangle type and color, no change needed.
-            if (currentPixel.fillStyle === targetFillStyle && currentPixel.mainColorIndex === targetMainColor) {
-                return false;
+            // Applying a triangle to a solid pixel
+            gridState[row][col] = {
+                mainColorIndex: newMainColor,
+                secondaryColorIndex: oldMainColor,  // Original solid color becomes secondary
+                fillStyle: clickedQuadrantStyle
+            };
+            changed = true;
+        } else if (oldFillStyle.startsWith('triangle-')) {
+            // Pixel is already a triangle.
+            const oppositeQuadrantOfOldStyle = getOppositeQuadrant(oldFillStyle);
+
+            // No-change checks:
+            if (clickedQuadrantStyle === oldFillStyle && newMainColor === oldMainColor) {
+                return false; // Clicked same half, new color is same as old main color.
             }
-        } 
-        // Else (unknown state), newSecondaryColor remains defaultPixelColorIndex.
+            if (clickedQuadrantStyle === oppositeQuadrantOfOldStyle && newMainColor === oldSecondaryColor) {
+                return false; // Clicked other half, new color is same as old secondary color.
+            }
 
-        gridState[row][col] = {
-            mainColorIndex: targetMainColor,
-            secondaryColorIndex: newSecondaryColor,
-            fillStyle: targetFillStyle
-        };
-        changed = true;
+            let finalMainColor = newMainColor;
+            let finalSecondaryColor;
+            let finalFillStyle = clickedQuadrantStyle;
 
+            if (clickedQuadrantStyle === oldFillStyle) {
+                // Case 1: Clicked quadrant corresponds to the half of the primary color.
+                // "replace primary with new color, keep secondary"
+                finalSecondaryColor = oldSecondaryColor;
+            } else if (clickedQuadrantStyle === oppositeQuadrantOfOldStyle) {
+                // Case 2: Clicked quadrant corresponds to the half of the secondary color.
+                // "replace secondary with new color as primary, turn former primary into secondary color"
+                finalSecondaryColor = oldMainColor; 
+            } else {
+                // Case 3: Clicked one of the other two (adjacent) quadrants.
+                // "apply triangle with new color as primary, keep former primary as new secondary"
+                finalSecondaryColor = oldMainColor;
+            }
+            
+            gridState[row][col] = {
+                mainColorIndex: finalMainColor,
+                secondaryColorIndex: finalSecondaryColor,
+                fillStyle: finalFillStyle
+            };
+            changed = true;
+        } else {
+            // Current pixel is in an unknown state (should not happen ideally if initialized properly)
+            // Or, this case could be hit if trying to apply to a non-solid, non-triangle (e.g. future patterns)
+            // For now, treat as applying to a default background.
+            gridState[row][col] = {
+                mainColorIndex: newMainColor,
+                secondaryColorIndex: defaultPixelColorIndex, 
+                fillStyle: clickedQuadrantStyle
+            };
+            changed = true;
+        }
     } else { // This case covers Pencil (quadrant = null), Bucket, Shapes, Erase for Half-pixel, etc.
         const effectiveTargetColor = (currentTool === 'tool-halfpixel' && mode === 'erase') 
                                       ? erasePixelColorIndex 
@@ -360,6 +397,18 @@ function handlePixelChange(row, col, mode, quadrant = null) { // Quadrant is sti
         return true;
     }
     return false;
+}
+
+function getOppositeQuadrant(fillStyle) {
+    if (!fillStyle || !fillStyle.startsWith('triangle-')) return null; // Invalid input
+    const quadrant = fillStyle.split('-')[1];
+    switch (quadrant) {
+        case 'tl': return 'triangle-br';
+        case 'br': return 'triangle-tl';
+        case 'tr': return 'triangle-bl';
+        case 'bl': return 'triangle-tr';
+        default: return null; // Should not happen with valid input
+    }
 }
 
 // --- Line Drawing Utility ---
