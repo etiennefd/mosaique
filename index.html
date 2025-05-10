@@ -122,6 +122,12 @@
             box-shadow: 0 0 3px rgba(0,0,0,0.5);
         }
 
+        /* NEW: Styling for the right-click selected swatch */
+        .color-swatch.right-selected {
+            outline: 2px dashed gray !important; /* A dashed outline, distinct from the solid primary selection */
+            outline-offset: -2px; /* Keeps the outline inside the swatch's border */
+        }
+
         /* Style for the former special-swatch (can be removed if .special-swatch class is no longer used anywhere) */
         /* .color-options .special-swatch { ... } */
 
