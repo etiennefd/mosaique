@@ -346,6 +346,11 @@ function handlePixelChange(row, col, mode, quadrant = null, targetColorIndex = s
                 secondaryColorIndex: oldMainColor,  // Original solid color becomes secondary
                 fillStyle: `triangle-${quadrant}`
             };
+            // NEW: Check if the new triangle effectively makes it a solid color
+            if (gridState[row][col].mainColorIndex === gridState[row][col].secondaryColorIndex) {
+                gridState[row][col].fillStyle = 'solid';
+                gridState[row][col].secondaryColorIndex = defaultPixelColorIndex; // Standardize secondary for solid
+            }
             changed = true;
         } else if (oldFillStyle.startsWith('triangle-')) {
             // Pixel is already a triangle.
@@ -383,6 +388,14 @@ function handlePixelChange(row, col, mode, quadrant = null, targetColorIndex = s
                 secondaryColorIndex: finalSecondaryColor,
                 fillStyle: finalFillStyle
             };
+
+            // NEW: Check if the updated triangle effectively makes it a solid color
+            // Only perform this check if the fillStyle is still a triangle after the main logic
+            if (gridState[row][col].fillStyle.startsWith('triangle-') &&
+                gridState[row][col].mainColorIndex === gridState[row][col].secondaryColorIndex) {
+                gridState[row][col].fillStyle = 'solid';
+                gridState[row][col].secondaryColorIndex = defaultPixelColorIndex; // Standardize secondary for solid
+            }
             changed = true;
         } else {
             // Current pixel is in an unknown state (should not happen ideally if initialized properly)
