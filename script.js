@@ -38,7 +38,6 @@ let currentDragMode = null; // 'draw' or 'erase' (pencil only for now)
 let isDrawingShape = false;
 let shapeStartX = null;
 let shapeStartY = null;
-let isTriangleModeEnabled = true; // Added for triangle mode
 
 // Selection State
 let selectionRect = null; // Stores { r1, c1, r2, c2 } of the selected area
@@ -250,66 +249,54 @@ function getPixelCoords(event) {
     return null; // Click is outside the grid boundaries
 }
 
-function handlePixelChange(row, col, mode, quadrant = null) { // Added quadrant, default to null
+function handlePixelChange(row, col, mode, quadrant = null) { // Quadrant is still passed for potential use by Half-pixel tool
     const currentPixel = gridState[row][col];
-    let newMainColorIndex; // To be assigned based on logic
-    // let newFillStyle = 'solid'; // Default, will be updated by logic
     let changed = false;
-
     const targetColorIndex = (mode === 'draw') ? selectedColorIndex : erasePixelColorIndex;
 
-    if (currentTool === 'pencil' && isTriangleModeEnabled && pixelSize > 1 && quadrant && mode === 'draw') {
-        const targetTriangleStyle = `triangle-${quadrant}`; // e.g., 'triangle-tl'
+    // This function will be expanded for the Half-pixel tool.
+    // For now, it primarily handles solid fills. Pencil tool will always pass quadrant = null.
+    // Tools (bucket, shapes) don't use quadrant and will result in solid.
 
+    // Default to solid fill for all tools unless specific Half-pixel logic (to be added) applies.
+    if (currentTool === 'tool-halfpixel' && quadrant && mode === 'draw') {
+        // Placeholder: Half-pixel tool specific logic will go here.
+        // For now, it falls through to solid behavior.
+        // To make it actually do something for halfpixel (example, not final):
+        /*
+        const targetTriangleStyle = `triangle-${quadrant}`;
+        let newSecondaryColor = currentPixel.secondaryColorIndex;
         if (currentPixel.fillStyle === 'solid') {
-            // If current is solid, change to triangle, unless it's already the target color (no visual change then for solidifying)
-            // This case is about dabbing a triangle onto a solid pixel.
-            // The new triangle's main color is targetColorIndex.
-            // The new triangle's secondary color should be the original solid color.
-            // Change always happens if dabbing a triangle on a solid pixel.
+            newSecondaryColor = currentPixel.mainColorIndex;
+        }
+        if (currentPixel.fillStyle !== targetTriangleStyle || currentPixel.mainColorIndex !== targetColorIndex) {
             gridState[row][col] = {
                 mainColorIndex: targetColorIndex,
-                secondaryColorIndex: currentPixel.mainColorIndex, // Store original solid color as secondary
-                fillStyle: targetTriangleStyle
-            };
-            changed = true;
-        } else if (currentPixel.fillStyle.startsWith('triangle-')) {
-            if (currentPixel.fillStyle === targetTriangleStyle) {
-                // Clicked same quadrant of an existing triangle
-                if (currentPixel.mainColorIndex !== targetColorIndex) {
-                    gridState[row][col].mainColorIndex = targetColorIndex; // Just change color
-                    changed = true;
-                }
-                // If color is already same, no change
-            } else {
-                // Clicked a different quadrant on an existing triangle pixel
-                // This solidifies the pixel with the new target color
-                gridState[row][col] = {
-                    mainColorIndex: targetColorIndex,
-                    secondaryColorIndex: defaultPixelColorIndex,
-                    fillStyle: 'solid'
-                };
-                changed = true;
-            }
-        } else { 
-            // Fallback: if fillStyle is unrecognized, treat as if dabbing a new triangle.
-            gridState[row][col] = {
-                mainColorIndex: targetColorIndex,
-                secondaryColorIndex: defaultPixelColorIndex,
+                secondaryColorIndex: newSecondaryColor,
                 fillStyle: targetTriangleStyle
             };
             changed = true;
         }
-        // newFillStyle = gridState[row][col].fillStyle; // Capture the style for drawing
-        newMainColorIndex = gridState[row][col].mainColorIndex;
-
-    } else { // Not pencil in triangle mode, or quadrant is null (solidify), or erasing
-        newMainColorIndex = targetColorIndex;
-        // newFillStyle = 'solid'; // Ensure solid fill
-        if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== newMainColorIndex) {
+        */
+        // TEMPORARY: For now, Half-pixel tool also makes solid pixels until fully implemented.
+        if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== targetColorIndex) {
             gridState[row][col] = {
-                mainColorIndex: newMainColorIndex,
-                secondaryColorIndex: defaultPixelColorIndex,
+                mainColorIndex: targetColorIndex,
+                secondaryColorIndex: (currentPixel.fillStyle === 'solid' && currentPixel.mainColorIndex !== targetColorIndex) 
+                                     ? currentPixel.mainColorIndex 
+                                     : (currentPixel.fillStyle.startsWith('triangle-') ? currentPixel.secondaryColorIndex : defaultPixelColorIndex),
+                fillStyle: 'solid'
+            };
+            changed = true;
+        }
+
+    } else { // This case covers Pencil (quadrant = null), Bucket, Shapes, and default for Half-pixel for now.
+        if (currentPixel.fillStyle !== 'solid' || currentPixel.mainColorIndex !== targetColorIndex) {
+            gridState[row][col] = {
+                mainColorIndex: targetColorIndex,
+                secondaryColorIndex: (currentPixel.fillStyle === 'solid' && currentPixel.mainColorIndex !== targetColorIndex) 
+                                     ? currentPixel.mainColorIndex 
+                                     : (currentPixel.fillStyle.startsWith('triangle-') ? currentPixel.secondaryColorIndex : defaultPixelColorIndex),
                 fillStyle: 'solid'
             };
             changed = true;
@@ -380,12 +367,9 @@ function drawLineBetweenPixels(r1, c1, r2, c2, mode) {
     let changed = false;
 
     while (true) {
-        // Apply change to the current pixel on the line
-        // When drawing lines (pencil drag or shift+click), always solidify if in triangle mode.
-        const quadrantForLinePixel = (currentTool === 'pencil' && isTriangleModeEnabled && pixelSize > 1) ? null : undefined;
-        // Pass null to handlePixelChange to force solid, or undefined if quadrant isn't relevant (e.g. other tools)
-        // The third argument to handlePixelChange is 'mode', the fourth is 'quadrant'
-        if (handlePixelChange(currentRow, currentCol, mode, quadrantForLinePixel)) {
+        // All tools using drawLineBetweenPixels will currently result in solid pixels.
+        // Pencil is reverted to solid lines. Half-pixel tool will need specific handling later.
+        if (handlePixelChange(currentRow, currentCol, mode, null /* force solid */)) {
              changed = true;
         }
 
@@ -816,28 +800,28 @@ canvas.addEventListener('mousedown', (event) => {
          isDrawingShape = false; // Pencil doesn't draw shapes
          // ... (existing pencil logic: shift+click and drag start)
          // ... (ensure history is saved here for pencil actions) ...
-         if (shiftKeyPressed && lastClickCoords) {
-            // Pencil Shift+Click Line
+         if (shiftKeyPressed && lastClickCoords && coords) { // Pencil Shift+Click Line
             isDragging = false;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
+            // drawLineBetweenPixels calls handlePixelChange with quadrant=null, ensuring solid lines for pencil.
             if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, coords.row, coords.col, 'draw')) {
                 changeOccurred = true;
             }
             if (!changeOccurred && history.length > 0) { history.pop(); }
-            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // Store full coords
-         } else {
-            // Pencil Click/Drag Start
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // Still store full coords for other tools
+         } else if (coords) { // Pencil Click/Drag Start
             isDragging = true;
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
-            currentDragMode = 'draw'; // Pencil always draws
-            // Pass the quadrant from coords to handlePixelChange for the initial dab
-            if (handlePixelChange(coords.row, coords.col, currentDragMode, coords.quadrant)) {
+            currentDragMode = 'draw';
+            // Pencil tool mousedown passes null for quadrant to ensure solid pixel via handlePixelChange.
+            if (handlePixelChange(coords.row, coords.col, currentDragMode, null )) {
                  changeOccurred = true;
             }
-            lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
-            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+            // Store full coords for other tools that might use lastPixelCoords/lastClickCoords with quadrant.
+            lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
         }
     } else if (currentTool === 'bucket') {
         isDrawingShape = false;
@@ -1410,6 +1394,11 @@ document.addEventListener('keydown', (event) => {
             updateSelectedTool('tool-select');
             return; // Handled
         }
+        if (event.key === 't') { // New shortcut for Half-pixel tool
+            event.preventDefault();
+            updateSelectedTool('tool-halfpixel');
+            return; // Handled
+        }
     }
     // --- End Tool Selection Shortcuts ---
 
@@ -1510,7 +1499,9 @@ function setupOptionsPanel() {
     const spacingSwatchElement = document.getElementById('color-9'); // Get spacing swatch directly
     const toolSpecificOptionsPanel = document.getElementById('tool-specific-options-panel');
     const pencilOptionsDiv = document.getElementById('pencil-options');
-    const triangleModeCheckbox = document.getElementById('triangleModeCheckbox');
+    // const triangleModeCheckbox = document.getElementById('triangleModeCheckbox'); // Reference REMOVED
+
+    // Initialization of isTriangleModeEnabled REMOVED
 
     updateSelectedSwatch = (newIndex) => {
         // Remove selected class from previously selected swatch
@@ -1645,14 +1636,6 @@ function setupOptionsPanel() {
         // Add dblclick listener solely to prevent default text selection behavior
         swatch.addEventListener('dblclick', openPickerHandler);
     });
-
-    // Triangle Mode Checkbox Listener
-    if (triangleModeCheckbox) {
-        triangleModeCheckbox.addEventListener('change', (event) => {
-            isTriangleModeEnabled = event.target.checked;
-            console.log(`Triangle mode ${isTriangleModeEnabled ? 'enabled' : 'disabled'}`);
-        });
-    }
 
     // --- Refactored Spacing Color Picker Logic ---
     function openSpacingColorPicker(event) {
