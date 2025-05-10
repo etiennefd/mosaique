@@ -1002,6 +1002,11 @@ canvas.addEventListener('mousedown', (event) => {
     // --- End Tool Specific Logic ---
 });
 
+// Prevent context menu on canvas right-click to allow secondary color usage
+canvas.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+});
+
 canvas.addEventListener('mousemove', (event) => {
     if (isDragging) {
         const coords = getPixelCoords(event);
