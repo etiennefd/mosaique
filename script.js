@@ -530,19 +530,239 @@ function drawLineBetweenPixels(r1, c1, r2, c2, mode, colorIndex) {
 }
 // --- End Line Drawing Utility ---
 
-// --- Flood Fill Utility ---
-// No change needed here, floodFill already takes fillColorIndex
-function floodFill(startRow, startCol, fillColorIndex) {
-    const startPixel = gridState[startRow][startCol];
-    // const startColorIndex = gridState[startRow][startCol];
+// --- NEW HELPER: Determine Color at Quadrant for Triangle ---
+// Helper to find which color (main or secondary) of a triangle is at a given quadrant,
+// and which is the other color.
+function determineColorAtQuadrant(pixel, quadrant) {
+    const { mainColorIndex, secondaryColorIndex, fillStyle } = pixel;
 
-    // For now, flood fill only works on solid pixels of the matching mainColorIndex
-    if (startPixel.fillStyle !== 'solid' || startPixel.mainColorIndex === fillColorIndex) {
-        console.log("Fill condition not met (not solid or same color), skipping fill.");
-        return false; // No change needed
+    if (!fillStyle.startsWith('triangle-') || !quadrant) {
+        // This function is only for triangles and when a quadrant is specified
+        // If it's somehow called on a solid pixel, treat its mainColor as the relevant one.
+        if (fillStyle === 'solid') {
+            return { color: mainColorIndex, isMain: true, otherColor: secondaryColorIndex };
+        }
+        console.warn("determineColorAtQuadrant called on non-triangle or without quadrant", pixel, quadrant);
+        // Fallback, though this path should ideally not be hit in flood fill context for triangles
+        return { color: mainColorIndex, isMain: true, otherColor: secondaryColorIndex }; // Simplified fallback
     }
-    const startMainColorIndex = startPixel.mainColorIndex;
 
+    const mainColorTriangleCorner = fillStyle.substring('triangle-'.length); // e.g. 'tl'
+
+    // CORRECTED LOGIC:
+    // For these half-pixel styles, the main color is ONLY in the specified quadrant.
+    // The other three quadrants are filled by the secondary color.
+    const targetIsMain = (quadrant === mainColorTriangleCorner);
+
+    if (targetIsMain) {
+        return { color: mainColorIndex, isMain: true, otherColor: secondaryColorIndex };
+    } else {
+        return { color: secondaryColorIndex, isMain: false, otherColor: mainColorIndex };
+    }
+}
+// --- END NEW HELPER ---
+
+// --- NEW HELPER: Get Triangle Part for Side ---
+// Helper function to determine which color of a triangle pixel is on a given side
+// (entrySide is the side of *this* pixel that is being approached from a neighbor)
+function getTrianglePartForSide(pixel, entrySide) {
+    const { mainColorIndex, secondaryColorIndex, fillStyle } = pixel;
+    let partColorIndex = -1;
+    let isMainPart = false;
+    let otherPartColorIndex = -1;
+
+    if (!fillStyle.startsWith('triangle-')) {
+        return null; // Not a triangle
+    }
+
+    const type = fillStyle.substring('triangle-'.length); // "tl", "tr", "bl", "br"
+
+    switch (type) {
+        case 'tl': // Main: top-left triangle, Secondary: bottom-right triangle
+            if (entrySide === 'top' || entrySide === 'left') { // Approaching the main-colored part
+                partColorIndex = mainColorIndex; isMainPart = true; otherPartColorIndex = secondaryColorIndex;
+            } else if (entrySide === 'bottom' || entrySide === 'right') { // Approaching the secondary-colored part
+                partColorIndex = secondaryColorIndex; isMainPart = false; otherPartColorIndex = mainColorIndex;
+            }
+            break;
+        case 'tr': // Main: top-right, Secondary: bottom-left
+            if (entrySide === 'top' || entrySide === 'right') {
+                partColorIndex = mainColorIndex; isMainPart = true; otherPartColorIndex = secondaryColorIndex;
+            } else if (entrySide === 'bottom' || entrySide === 'left') {
+                partColorIndex = secondaryColorIndex; isMainPart = false; otherPartColorIndex = mainColorIndex;
+            }
+            break;
+        case 'bl': // Main: bottom-left, Secondary: top-right
+            if (entrySide === 'bottom' || entrySide === 'left') {
+                partColorIndex = mainColorIndex; isMainPart = true; otherPartColorIndex = secondaryColorIndex;
+            } else if (entrySide === 'top' || entrySide === 'right') {
+                partColorIndex = secondaryColorIndex; isMainPart = false; otherPartColorIndex = mainColorIndex;
+            }
+            break;
+        case 'br': // Main: bottom-right, Secondary: top-left
+            if (entrySide === 'bottom' || entrySide === 'right') {
+                partColorIndex = mainColorIndex; isMainPart = true; otherPartColorIndex = secondaryColorIndex;
+            } else if (entrySide === 'top' || entrySide === 'left') {
+                partColorIndex = secondaryColorIndex; isMainPart = false; otherPartColorIndex = mainColorIndex;
+            }
+            break;
+    }
+
+    if (partColorIndex !== -1) {
+        return { partColorIndex, isMainPart, otherPartColorIndex };
+    }
+    console.warn(`Could not determine triangle part for fillStyle ${fillStyle} and entrySide ${entrySide}`);
+    return null;
+}
+// --- END NEW HELPER ---
+
+// --- NEW HELPER: Check for Corner Connection Config ---
+function isCornerConnectionConfig(style1, style2, axis) {
+    // style1 is the style of the first pixel (left one in horizontal, top one in vertical)
+    // style2 is the style of the second pixel (right one in horizontal, bottom one in vertical)
+    // axis is 'horizontal' or 'vertical'
+    // This function checks if the *main colored triangles* of these two styles would only touch at a corner.
+
+    if (!style1 || !style1.startsWith('triangle-') || !style2 || !style2.startsWith('triangle-')) {
+        return false; // Not applicable if not both are triangles
+    }
+
+    const s1_type = style1.substring('triangle-'.length);
+    const s2_type = style2.substring('triangle-'.length);
+
+    if (axis === 'horizontal') {
+        // style1 (left pixel), style2 (right pixel)
+        if ((s1_type === 'br' && s2_type === 'tl') || (s1_type === 'tr' && s2_type === 'bl')) {
+            return true; // Main triangles touch at a corner
+        }
+    } else if (axis === 'vertical') {
+        // style1 (top pixel), style2 (bottom pixel)
+        if ((s1_type === 'bl' && s2_type === 'tr') || (s1_type === 'br' && s2_type === 'tl')) {
+            return true; // Main triangles touch at a corner
+        }
+    }
+    return false;
+}
+// --- END NEW HELPER ---
+
+// --- NEW HELPER: Set Pixel Part Color ---
+function setPixelPartColor(pixel, isMainPartToChange, newColorIndex) {
+    let changed = false;
+    const oldMain = pixel.mainColorIndex;
+    const oldSecondary = pixel.secondaryColorIndex;
+    const oldStyle = pixel.fillStyle;
+
+    if (pixel.fillStyle === 'solid') {
+        if (isMainPartToChange) { // For solid, only main part is relevant
+            if (pixel.mainColorIndex !== newColorIndex) {
+                pixel.mainColorIndex = newColorIndex;
+                // Secondary color of a solid pixel should remain consistent (e.g., defaultPixelColorIndex)
+                pixel.secondaryColorIndex = defaultPixelColorIndex;
+                changed = true;
+            }
+        } else {
+            // Attempting to change secondary part of a solid pixel directly doesn't make sense in this context.
+            // It implies the fill logic might have a slight mismatch if it tries this.
+            // For now, we assume solid pixels are only changed via their mainColorIndex by setPixelPartColor.
+        }
+    } else if (pixel.fillStyle.startsWith('triangle-')) {
+        if (isMainPartToChange) {
+            if (pixel.mainColorIndex !== newColorIndex) {
+                pixel.mainColorIndex = newColorIndex;
+                changed = true;
+            }
+        } else { // Change secondary part
+            if (pixel.secondaryColorIndex !== newColorIndex) {
+                pixel.secondaryColorIndex = newColorIndex;
+                changed = true;
+            }
+        }
+
+        if (changed) { // Only check for solidification if a color was actually changed
+            if (pixel.mainColorIndex === pixel.secondaryColorIndex) {
+                pixel.fillStyle = 'solid';
+                // When solidifying, the now-unified color is the main color.
+                // Standardize secondaryColorIndex for solid pixels.
+                pixel.secondaryColorIndex = defaultPixelColorIndex;
+            }
+        }
+    }
+    // If style changed from triangle to solid, it counts as a change.
+    if (oldStyle !== pixel.fillStyle && pixel.fillStyle === 'solid') changed = true;
+
+    return changed;
+}
+// --- END NEW HELPER ---
+
+// --- NEW HELPER: Determine Source Color for Propagation ---
+function determineSourceColorForPropagation(sourcePixel, directionToNeighbor) {
+    if (sourcePixel.fillStyle === 'solid') {
+        return sourcePixel.mainColorIndex;
+    }
+
+    const styleType = sourcePixel.fillStyle.substring('triangle-'.length);
+
+    switch (styleType) {
+        case 'tl':
+            if (directionToNeighbor === 'up' || directionToNeighbor === 'left') {
+                return sourcePixel.mainColorIndex;
+            } else { // down or right
+                return sourcePixel.secondaryColorIndex;
+            }
+        case 'tr':
+            if (directionToNeighbor === 'up' || directionToNeighbor === 'right') {
+                return sourcePixel.mainColorIndex;
+            } else { // down or left
+                return sourcePixel.secondaryColorIndex;
+            }
+        case 'bl':
+            if (directionToNeighbor === 'down' || directionToNeighbor === 'left') {
+                return sourcePixel.mainColorIndex;
+            } else { // up or right
+                return sourcePixel.secondaryColorIndex;
+            }
+        case 'br':
+            if (directionToNeighbor === 'down' || directionToNeighbor === 'right') {
+                return sourcePixel.mainColorIndex;
+            } else { // up or left
+                return sourcePixel.secondaryColorIndex;
+            }
+        default:
+            console.warn("Unknown triangle type in determineSourceColorForPropagation:", styleType);
+            return sourcePixel.mainColorIndex; // Fallback
+    }
+}
+// --- END NEW HELPER ---
+
+// --- Flood Fill Utility ---
+// MODIFIED: Removed startQuadrant parameter
+function floodFill(startRow, startCol, fillColorIndex) {
+    const initialPixel = gridState[startRow][startCol];
+    let originalColorToReplace;
+    let initialPixelWasSolid = initialPixel.fillStyle === 'solid';
+
+    if (initialPixelWasSolid) {
+        if (initialPixel.mainColorIndex === fillColorIndex) {
+            console.log("Initial solid pixel is already the target color. Skipping fill.");
+            return false;
+        }
+        originalColorToReplace = initialPixel.mainColorIndex;
+    } else if (initialPixel.fillStyle.startsWith('triangle-')) {
+        // If main color isn't the fill color, target main color.
+        if (initialPixel.mainColorIndex !== fillColorIndex) {
+            originalColorToReplace = initialPixel.mainColorIndex;
+        // If main color IS the fill color, try targeting secondary color.
+        } else if (initialPixel.secondaryColorIndex !== fillColorIndex) {
+            originalColorToReplace = initialPixel.secondaryColorIndex;
+        } else {
+            // Both main and secondary are already the fill color.
+            console.log("Initial triangle pixel is already entirely the target color. Skipping fill.");
+            return false;
+        }
+    } else {
+        console.warn("Flood fill started on pixel with unknown fillStyle:", initialPixel.fillStyle);
+        return false; // Not a known fillable type
+    }
 
     // Save state before filling for undo
     if (history.length >= MAX_HISTORY) {
@@ -554,8 +774,37 @@ function floodFill(startRow, startCol, fillColorIndex) {
     const queue = [[startRow, startCol]]; // Queue of [row, col] pairs
     let iterations = 0; // Safety break
     const maxIterations = gridRows * gridCols * 10; // Generous limit
+    const visited = new Set(); // Keep track of visited pixels to prevent redundant processing and infinite loops with triangles
 
-    let pixelsChanged = 0;
+    let pixelsChangedThisFill = 0; // Renamed to avoid conflict with outer scope if any
+
+    // Handle the initial pixel directly
+    if (initialPixelWasSolid) {
+        // This case is simple: originalColorToReplace is initialPixel.mainColorIndex
+        gridState[startRow][startCol] = {
+            mainColorIndex: fillColorIndex,
+            secondaryColorIndex: defaultPixelColorIndex,
+            fillStyle: 'solid'
+        };
+    } else { // Initial pixel was a triangle
+        // Determine which part to change based on what originalColorToReplace ended up being.
+        if (initialPixel.mainColorIndex === originalColorToReplace) {
+            initialPixel.mainColorIndex = fillColorIndex;
+        } else if (initialPixel.secondaryColorIndex === originalColorToReplace) {
+            // This branch will be hit if mainColorIndex was already fillColorIndex,
+            // so we targeted secondaryColorIndex for replacement.
+            initialPixel.secondaryColorIndex = fillColorIndex;
+        }
+        // else: should not happen if originalColorToReplace was set correctly and is not already fillColorIndex
+
+        // Check if it becomes solid
+        if (initialPixel.mainColorIndex === initialPixel.secondaryColorIndex) {
+            initialPixel.fillStyle = 'solid';
+            initialPixel.secondaryColorIndex = defaultPixelColorIndex;
+        }
+    }
+    visited.add(`${startRow},${startCol}`);
+    pixelsChangedThisFill++;
 
     while (queue.length > 0) {
         if (iterations++ > maxIterations) {
@@ -563,39 +812,97 @@ function floodFill(startRow, startCol, fillColorIndex) {
             break;
         }
 
-        const [row, col] = queue.shift();
+        const [r, c] = queue.shift();
+        const currentPixel = gridState[r][c];
 
-        // Bounds check and color check before processing
-        if (row < 0 || row >= gridRows || col < 0 || col >= gridCols ||
-            gridState[row][col].fillStyle !== 'solid' || gridState[row][col].mainColorIndex !== startMainColorIndex) {
-            continue;
+        // Define neighbors relative to [r, c] and their directions
+        const neighborInfos = [
+            { nr: r - 1, nc: c, directionFromCurrent: 'up',    entrySideForNeighbor: 'bottom' },
+            { nr: r + 1, nc: c, directionFromCurrent: 'down',  entrySideForNeighbor: 'top'    },
+            { nr: r, nc: c - 1, directionFromCurrent: 'left',  entrySideForNeighbor: 'right'  },
+            { nr: r, nc: c + 1, directionFromCurrent: 'right', entrySideForNeighbor: 'left'   }
+        ];
+
+        for (const { nr, nc, directionFromCurrent, entrySideForNeighbor } of neighborInfos) {
+            if (nr < 0 || nr >= gridRows || nc < 0 || nc >= gridCols || visited.has(`${nr},${nc}`)) {
+                continue;
+            }
+
+            const neighborPixel = gridState[nr][nc];
+            // REMOVE isCornerConnectionConfig CHECKS
+            // let allowFillDueToCorner = true; 
+
+            // if (currentPixel.fillStyle.startsWith('triangle-') && neighborPixel.fillStyle.startsWith('triangle-')) {
+            //     let first_style, second_style, connection_axis;
+            //     if (directionFromCurrent === 'left' || directionFromCurrent === 'right') {
+            //         connection_axis = 'horizontal';
+            //         first_style = (directionFromCurrent === 'left') ? neighborPixel.fillStyle : currentPixel.fillStyle;
+            //         second_style = (directionFromCurrent === 'left') ? currentPixel.fillStyle : neighborPixel.fillStyle;
+            //     } else { // up or down
+            //         connection_axis = 'vertical';
+            //         first_style = (directionFromCurrent === 'up') ? neighborPixel.fillStyle : currentPixel.fillStyle;
+            //         second_style = (directionFromCurrent === 'up') ? currentPixel.fillStyle : neighborPixel.fillStyle;
+            //     }
+            //     if (isCornerConnectionConfig(first_style, second_style, connection_axis)) {
+            //         allowFillDueToCorner = false;
+            //     }
+            // }
+
+            // if (!allowFillDueToCorner) {
+            //     continue; 
+            // }
+
+            const current_facing_color = determineSourceColorForPropagation(currentPixel, directionFromCurrent);
+            const source_contribution_ok = (current_facing_color === fillColorIndex || current_facing_color === originalColorToReplace);
+
+            let targetColorInNeighbor;
+            let isMainPartOfNeighbor = true; // Default for solid or if getTrianglePartForSide returns null
+            let neighbor_contribution_ok = false;
+
+            if (neighborPixel.fillStyle === 'solid') {
+                targetColorInNeighbor = neighborPixel.mainColorIndex;
+                if (targetColorInNeighbor === originalColorToReplace) {
+                    neighbor_contribution_ok = true;
+                }
+            } else { // Triangle neighbor
+                const infoN = getTrianglePartForSide(neighborPixel, entrySideForNeighbor);
+                if (infoN) {
+                    targetColorInNeighbor = infoN.partColorIndex;
+                    isMainPartOfNeighbor = infoN.isMainPart;
+                    if (targetColorInNeighbor === originalColorToReplace) {
+                        neighbor_contribution_ok = true;
+                    }
+                } else {
+                    console.warn("getTrianglePartForSide returned null for a triangle in floodFill", neighborPixel);
+                    continue; // Skip this problematic neighbor
+                }
+            }
+
+            if (source_contribution_ok && neighbor_contribution_ok) {
+                if (setPixelPartColor(neighborPixel, isMainPartOfNeighbor, fillColorIndex)) {
+                    visited.add(`${nr},${nc}`);
+                    queue.push([nr, nc]);
+                    pixelsChangedThisFill++;
+                }
+            }
         }
-
-        // Change color and mark as processed (by changing color)
-        // gridState[row][col] = fillColorIndex;
-        gridState[row][col] = {
-            mainColorIndex: fillColorIndex,
-            secondaryColorIndex: defaultPixelColorIndex,
-            fillStyle: 'solid'
-        };
-        pixelsChanged++;
-
-        // Add neighbors to the queue
-        queue.push([row + 1, col]); // Down
-        queue.push([row - 1, col]); // Up
-        queue.push([row, col + 1]); // Right
-        queue.push([row, col - 1]); // Left
     }
 
-    if (pixelsChanged > 0) {
+    if (pixelsChangedThisFill > 0) {
         drawGrid(); // Redraw the entire grid after fill
-        console.log(`Flood fill completed. ${pixelsChanged} pixels changed.`);
+        console.log(`Flood fill completed. ${pixelsChangedThisFill} pixels changed.`);
         return true; // Indicate change occurred
     } else {
-         // If no pixels were actually changed (e.g., hit iteration limit early), remove saved state
-        if (history.length > 0) {
+         // If no pixels were actually changed (e.g., hit iteration limit early, or initial was already target color and no spread),
+         // remove saved state
+        if (history.length > 0 && pixelsChangedThisFill === 0) { // Ensure we only pop if this fill action truly did nothing
+             // The initial pixel check should prevent history push if no change is possible from the start.
+             // This pop is a safeguard if history was pushed but then the fill didn't expand.
+             const lastState = history[history.length -1];
+             // Check if the last history state was for THIS flood fill (can be tricky)
+             // For now, assume if pixelsChangedThisFill is 0, the history push was for this no-op fill.
             history.pop();
-             console.log(`No change detected (Flood Fill), removed saved state. History size: ${history.length}`);
+            console.log(`No change detected (Flood Fill), removed saved state. History size: ${history.length}`);
         }
         return false;
     }
@@ -966,11 +1273,11 @@ canvas.addEventListener('mousedown', (event) => {
     } else if (currentTool === 'tool-bucket') {
         isDrawingShape = false;
         isDragging = false;
-        // Flood fill with the activeDrawingColorIndex
+        // Flood fill with the activeDrawingColorIndex, no quadrant needed now
         if (floodFill(coords.row, coords.col, activeDrawingColorIndex)) {
             changeOccurred = true;
         }
-        lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
+        lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // quadrant here is for other tools like half-pixel
     } else if (currentTool === 'tool-halfpixel') {
         if (coords && coords.quadrant) {
             isDragging = true;
