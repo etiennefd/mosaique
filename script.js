@@ -735,11 +735,12 @@ function determineSourceColorForPropagation(sourcePixel, directionToNeighbor) {
 // --- END NEW HELPER ---
 
 // --- Flood Fill Utility ---
-// MODIFIED: Removed startQuadrant parameter
-function floodFill(startRow, startCol, fillColorIndex) {
+// MODIFIED: Added startQuadrant parameter back
+function floodFill(startRow, startCol, startQuadrant, fillColorIndex) {
     const initialPixel = gridState[startRow][startCol];
     let originalColorToReplace;
     let initialPixelWasSolid = initialPixel.fillStyle === 'solid';
+    let initialClickedPartIsMain = true; // For solid pixels, or as default
 
     if (initialPixelWasSolid) {
         if (initialPixel.mainColorIndex === fillColorIndex) {
@@ -747,18 +748,21 @@ function floodFill(startRow, startCol, fillColorIndex) {
             return false;
         }
         originalColorToReplace = initialPixel.mainColorIndex;
+        // initialClickedPartIsMain remains true
     } else if (initialPixel.fillStyle.startsWith('triangle-')) {
-        // If main color isn't the fill color, target main color.
-        if (initialPixel.mainColorIndex !== fillColorIndex) {
-            originalColorToReplace = initialPixel.mainColorIndex;
-        // If main color IS the fill color, try targeting secondary color.
-        } else if (initialPixel.secondaryColorIndex !== fillColorIndex) {
-            originalColorToReplace = initialPixel.secondaryColorIndex;
-        } else {
-            // Both main and secondary are already the fill color.
-            console.log("Initial triangle pixel is already entirely the target color. Skipping fill.");
+        if (!startQuadrant) {
+            console.warn("Flood fill on a triangle requires a startQuadrant for initial click. Skipping fill.");
+            // This case should ideally not be hit if coords are always passed.
             return false;
         }
+        const { color: clickedPartColor, isMain: partIsMain } = determineColorAtQuadrant(initialPixel, startQuadrant);
+        initialClickedPartIsMain = partIsMain; // Store if the clicked part was main or secondary
+
+        if (clickedPartColor === fillColorIndex) {
+            console.log("Clicked part of the initial triangle is already the target color. Skipping fill.");
+            return false;
+        }
+        originalColorToReplace = clickedPartColor;
     } else {
         console.warn("Flood fill started on pixel with unknown fillStyle:", initialPixel.fillStyle);
         return false; // Not a known fillable type
@@ -779,30 +783,27 @@ function floodFill(startRow, startCol, fillColorIndex) {
     let pixelsChangedThisFill = 0; // Renamed to avoid conflict with outer scope if any
 
     // Handle the initial pixel directly
-    if (initialPixelWasSolid) {
-        // This case is simple: originalColorToReplace is initialPixel.mainColorIndex
-        gridState[startRow][startCol] = {
-            mainColorIndex: fillColorIndex,
-            secondaryColorIndex: defaultPixelColorIndex,
-            fillStyle: 'solid'
-        };
-    } else { // Initial pixel was a triangle
-        // Determine which part to change based on what originalColorToReplace ended up being.
-        if (initialPixel.mainColorIndex === originalColorToReplace) {
-            initialPixel.mainColorIndex = fillColorIndex;
-        } else if (initialPixel.secondaryColorIndex === originalColorToReplace) {
-            // This branch will be hit if mainColorIndex was already fillColorIndex,
-            // so we targeted secondaryColorIndex for replacement.
-            initialPixel.secondaryColorIndex = fillColorIndex;
-        }
-        // else: should not happen if originalColorToReplace was set correctly and is not already fillColorIndex
-
-        // Check if it becomes solid
-        if (initialPixel.mainColorIndex === initialPixel.secondaryColorIndex) {
-            initialPixel.fillStyle = 'solid';
-            initialPixel.secondaryColorIndex = defaultPixelColorIndex;
-        }
+    // Use setPixelPartColor, passing initialClickedPartIsMain for triangles.
+    // For solid pixels, setPixelPartColor effectively ignores the second param or treats it as true.
+    if (setPixelPartColor(initialPixel, initialClickedPartIsMain, fillColorIndex)) {
+        pixelsChangedThisFill++;
+    } else {
+        // If the initial pixel wasn't actually changed by setPixelPartColor (e.g. already correct, or some other edge case)
+        // AND we determined earlier that it wasn't already the target color (so originalColorToReplace was set),
+        // this might indicate an issue. However, the primary check for "already target color" is done above.
+        // If originalColorToReplace was not even set (e.g. initial pixel already target color), we'd have returned.
+        // So, if we are here, and setPixelPartColor returns false, it means originalColorToReplace was set,
+        // but the specific part didn't change (e.g. a triangle where main was clicked, secondary was already fill color,
+        // and main was != fill color -- setPixelPartColor would change main and return true).
+        // This path (else here) should be rare if initial checks for "already target color" are robust.
+        console.log("Initial pixel was not changed by setPixelPartColor, though fill was initiated.")
+        // We might still want to proceed if originalColorToReplace has a valid value for neighbors to check against,
+        // but if the first pixel itself cannot be changed to fillColorIndex, it's likely the fill shouldn't start.
+        // The earlier checks for (clickedPartColor === fillColorIndex) or (solid.main === fillColorIndex) should cover this.
+        // For now, if setPixelPartColor does nothing, but we decided to proceed, assume originalColorToReplace is valid
+        // and the fill can attempt to spread. The pixelsChangedThisFill will remain 0 if nothing happens.
     }
+
     visited.add(`${startRow},${startCol}`);
     pixelsChangedThisFill++;
 
@@ -1273,11 +1274,15 @@ canvas.addEventListener('mousedown', (event) => {
     } else if (currentTool === 'tool-bucket') {
         isDrawingShape = false;
         isDragging = false;
-        // Flood fill with the activeDrawingColorIndex, no quadrant needed now
-        if (floodFill(coords.row, coords.col, activeDrawingColorIndex)) {
+        // Flood fill with the activeDrawingColorIndex, passing quadrant for initial click interpretation
+        if (coords && floodFill(coords.row, coords.col, coords.quadrant, activeDrawingColorIndex)) {
             changeOccurred = true;
         }
-        lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; // quadrant here is for other tools like half-pixel
+        if(coords) { // Ensure coords exist before trying to access its properties
+            lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
+        } else {
+            lastClickCoords = null;
+        }
     } else if (currentTool === 'tool-halfpixel') {
         if (coords && coords.quadrant) {
             isDragging = true;
