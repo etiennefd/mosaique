@@ -29,6 +29,7 @@ let selectedColorIndex = 0; // Default to the first color (Dark Blue)
 let gridState = []; // 2D array to store pixel state (now stores pixel objects)
 let history = [];   // Array to store previous grid states for undo
 const MAX_HISTORY = 50; // Limit undo history size
+let redoHistory = []; // NEW: Array to store states for redo
 let isDragging = false;
 let lastPixelCoords = null; // Store the last {row, col} during drag
 let lastClickCoords = null; // Store the last {row, col} clicked for Shift+Click line
@@ -773,6 +774,7 @@ function floodFill(startRow, startCol, startQuadrant, fillColorIndex) {
         history.shift();
     }
     history.push(deepCopyGrid(gridState));
+    redoHistory = []; // Clear redo history on new action
     console.log(`State saved (Flood Fill). History size: ${history.length}`);
 
     const queue = [[startRow, startCol]]; // Queue of [row, col] pairs
@@ -1256,7 +1258,7 @@ canvas.addEventListener('mousedown', (event) => {
             if (drawLineBetweenPixels(lastClickCoords.row, lastClickCoords.col, coords.row, coords.col, 'draw', activeDrawingColorIndex)) {
                 changeOccurred = true;
             }
-            if (!changeOccurred && history.length > 0) { history.pop(); }
+            if (!changeOccurred && history.length > 0) { history.pop(); } else if (changeOccurred) { redoHistory = []; } // Clear redo
             lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
         } else if (coords) { // Pencil Click/Drag Start
             isDragging = true;
@@ -1268,6 +1270,7 @@ canvas.addEventListener('mousedown', (event) => {
             if (handlePixelChange(coords.row, coords.col, currentDragMode, null, activeDrawingColorIndex )) {
                 changeOccurred = true;
             }
+            if (changeOccurred) { redoHistory = []; } // Clear redo
             lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
             lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
         }
@@ -1277,6 +1280,7 @@ canvas.addEventListener('mousedown', (event) => {
         // Flood fill with the activeDrawingColorIndex, passing quadrant for initial click interpretation
         if (coords && floodFill(coords.row, coords.col, coords.quadrant, activeDrawingColorIndex)) {
             changeOccurred = true;
+            // redoHistory is cleared inside floodFill if successful
         }
         if(coords) { // Ensure coords exist before trying to access its properties
             lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant }; 
@@ -1293,6 +1297,7 @@ canvas.addEventListener('mousedown', (event) => {
             if (handlePixelChange(coords.row, coords.col, 'draw', coords.quadrant, activeDrawingColorIndex)) {
                 changeOccurred = true;
             }
+            if (changeOccurred) { redoHistory = []; } // Clear redo
             lastPixelCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
             lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
         } else {
@@ -1303,6 +1308,7 @@ canvas.addEventListener('mousedown', (event) => {
         isDragging = true;
          if (history.length >= MAX_HISTORY) { history.shift(); }
          history.push(deepCopyGrid(gridState));
+         redoHistory = []; // Clear redo history on new shape start
          console.log(`Starting shape: ${currentTool} with color index ${activeDrawingColorIndex}`);
          lastClickCoords = { row: coords.row, col: coords.col, quadrant: coords.quadrant };
     } else if (currentTool === 'tool-select') {
@@ -1319,6 +1325,7 @@ canvas.addEventListener('mousedown', (event) => {
             // Save state *before* move starts (for undo)
             if (history.length >= MAX_HISTORY) { history.shift(); }
             history.push(deepCopyGrid(gridState));
+            redoHistory = []; // Clear redo history on new action (move)
             console.log("Starting selection move.");
             // No change yet, changeOccurred = false
             // --- End Start Moving ---
@@ -1598,7 +1605,116 @@ canvas.addEventListener('mouseleave', (event) => {
 // --- Keyboard Listeners ---
 document.addEventListener('keydown', (event) => {
 
-    // --- Undo Logic (Check this FIRST, as it requires modifiers) ---
+    // --- Redo Logic (Cmd/Ctrl + Shift + Z) ---
+    const isRedo = (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'z';
+    if (isRedo) {
+        event.preventDefault();
+        if (document.activeElement && 
+            (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+            document.activeElement.blur();
+        }
+        if (isDragging) return;
+
+        if (redoHistory.length > 0) {
+            const nextState = redoHistory.pop();
+
+            // Save current state to history for undoing the redo
+            let currentStateForUndo;
+            if (nextState.config) { // If redoing a config change, save current config for undo
+                currentStateForUndo = {
+                    grid: deepCopyGrid(gridState),
+                    config: {
+                        rows: gridRows,
+                        cols: gridCols,
+                        pixelSize: pixelSize,
+                        spacing: spacing
+                    },
+                    pal: [...palette],
+                    spacingColor: spacingColor
+                };
+            } else if (nextState.grid && !Array.isArray(nextState)) { // If redoing a palette/spacing change
+                currentStateForUndo = {
+                    grid: deepCopyGrid(gridState),
+                    pal: [...palette],
+                    spacingColor: spacingColor
+                };
+            } else { // Simple drawing action being redone
+                currentStateForUndo = deepCopyGrid(gridState);
+            }
+            if (history.length >= MAX_HISTORY) { history.shift(); }
+            history.push(currentStateForUndo);
+
+            // Apply the redone state
+            if (nextState.config) {
+                console.log("Redo: Restoring next grid configuration.");
+                gridState = nextState.grid;
+                gridRows = nextState.config.rows;
+                gridCols = nextState.config.cols;
+                pixelSize = nextState.config.pixelSize;
+                spacing = nextState.config.spacing;
+
+                const psInput = document.getElementById('pixelSizeInput');
+                if (psInput) psInput.value = pixelSize;
+                const spInput = document.getElementById('spacingInput');
+                if (spInput) spInput.value = spacing;
+                const grInput = document.getElementById('gridRowsInput');
+                if (grInput) grInput.value = gridRows;
+                const gcInput = document.getElementById('gridColsInput');
+                if (gcInput) gcInput.value = gridCols;
+
+                if (nextState.pal) {
+                    palette = nextState.pal;
+                    palette.forEach((color, index) => {
+                        if (index < 9) {
+                            const swatch = document.getElementById(`color-${index}`);
+                            if (swatch) swatch.style.backgroundColor = color;
+                        }
+                    });
+                }
+                if (typeof nextState.spacingColor !== 'undefined') {
+                    spacingColor = nextState.spacingColor;
+                    const spacingSwatch = document.getElementById('color-9');
+                    if (spacingSwatch) spacingSwatch.style.backgroundColor = spacingColor;
+                }
+                reinitializeCanvasAndGrid(deepCopyGrid(gridState), nextState.config);
+            } else {
+                console.log("Redo: Restoring next drawing/palette/spacing state.");
+                if (Array.isArray(nextState)) { // Simple drawing action
+                    gridState = nextState;
+                } else if (nextState.grid) { // Palette or spacing color change
+                    gridState = nextState.grid;
+                    if (nextState.pal) {
+                        palette = nextState.pal;
+                        palette.forEach((color, index) => {
+                            if (index < 9) {
+                                const swatch = document.getElementById(`color-${index}`);
+                                if (swatch) swatch.style.backgroundColor = color;
+                            }
+                        });
+                        console.log("Redone palette state.");
+                    }
+                    if (typeof nextState.spacingColor !== 'undefined') {
+                        spacingColor = nextState.spacingColor;
+                        const spacingSwatch = document.getElementById('color-9');
+                        if (spacingSwatch) spacingSwatch.style.backgroundColor = spacingColor;
+                        console.log("Redone spacing color state.");
+                    }
+                }
+                drawGrid();
+            }
+            clearPreviewCanvas();
+            if (selectionRect) {
+                drawPreviewSelection(selectionRect.r1, selectionRect.c1, selectionRect.r2, selectionRect.c2);
+            }
+            console.log(`Redo executed. Redo history size: ${redoHistory.length}, Undo history size: ${history.length}`);
+        } else {
+            console.log("Nothing to redo.");
+        }
+        return; // Stop processing if redo was handled
+    }
+    // --- End Redo Logic ---
+
+    // --- Undo Logic (Check this SECOND, as it requires modifiers) ---
     const isUndo = (event.metaKey || event.ctrlKey) && event.key === 'z';
     if (isUndo) {
          event.preventDefault(); // Prevent browser's default undo behavior (e.g., for focused inputs)
@@ -1613,6 +1729,32 @@ document.addEventListener('keydown', (event) => {
  
          if (history.length > 0) {
              const previousState = history.pop(); 
+
+             // --- NEW: Push current state to redoHistory before undoing ---
+             let currentStateForRedo;
+             if (previousState.config) { // If undoing a config change, save current config too
+                currentStateForRedo = {
+                    grid: deepCopyGrid(gridState),
+                    config: {
+                        rows: gridRows,
+                        cols: gridCols,
+                        pixelSize: pixelSize,
+                        spacing: spacing
+                    },
+                    pal: [...palette],
+                    spacingColor: spacingColor
+                };
+             } else if (previousState.grid) { // If undoing a palette/spacing change, save that structure
+                currentStateForRedo = {
+                    grid: deepCopyGrid(gridState),
+                    pal: [...palette],
+                    spacingColor: spacingColor
+                };
+             } else { // Simple drawing action, save current grid
+                currentStateForRedo = deepCopyGrid(gridState);
+             }
+             redoHistory.push(currentStateForRedo);
+             // --- END NEW --- 
 
              // Check if this state includes full grid configuration
              if (previousState.config) {
@@ -1728,6 +1870,7 @@ document.addEventListener('keydown', (event) => {
         if (history.length >= MAX_HISTORY) { history.shift(); }
         history.push(deepCopyGrid(gridState));
         console.log(`State saved (Cut). History size: ${history.length}`);
+        redoHistory = []; // Clear redo on Cut
 
         if (copySelectionToBuffer()) {
             if (eraseGridArea(selectionRect)) {
@@ -1767,6 +1910,7 @@ document.addEventListener('keydown', (event) => {
         if (history.length >= MAX_HISTORY) { history.shift(); }
         history.push(deepCopyGrid(gridState));
         console.log(`State saved (Paste). History size: ${history.length}`);
+        redoHistory = []; // Clear redo on Paste
 
         if (pasteBufferToGrid(targetRow, targetCol)) {
             // Update selectionRect to the newly pasted area
@@ -2049,6 +2193,7 @@ function setupOptionsPanel() {
                             pal: paletteStateAtPickerOpen,
                             spacingColor: spacingColor
                         });
+                        redoHistory = []; // Clear redo history
                         console.log(`State saved (Palette Change for index ${indexToEdit}). History size: ${history.length}`);
                     }
                     drawGrid();
@@ -2116,6 +2261,7 @@ function setupOptionsPanel() {
                         pal: [...palette], 
                         spacingColor: originalSpacingColorValue 
                     });
+                    redoHistory = []; // Clear redo history
                     console.log(`State saved (Spacing Color Change). History size: ${history.length}`);
                 }
                 drawGrid(); 
@@ -2314,6 +2460,7 @@ function updateGridConfiguration() {
         pal: [...palette], // Make sure this is a copy if palette can be mutated
         spacingColor: spacingColor
     });
+    redoHistory = []; // Clear redo history on config change
     console.log(`State saved (Config Change). History size: ${history.length}`);
 
     const oldGridDataForReinit = deepCopyGrid(gridState); // This is the state BEFORE globals change
